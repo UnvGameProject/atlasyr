@@ -95,6 +95,9 @@ impl UserSession {
     }
 
     /// Atomically re-key an existing session during token rotation.
+    // Production use begins when session rotation is attached to a
+    // reauthentication / MFA boundary. Persistence tests exercise it today.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) async fn replace_token(
         pool: &PgPool,
         revoked: &[u8; 32],

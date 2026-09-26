@@ -153,6 +153,11 @@ pub(crate) async fn refresh(cx: &Cx) -> SessionResult<Option<UserSession>> {
 /// The application row is re-keyed from Topcoat's explicitly revoked hash
 /// to the replacement hash. Rotation cannot extend the session beyond its
 /// original absolute deadline.
+// Reserved for security-sensitive reauthentication / MFA flows.
+//
+// Keep this allowance local: unrelated dead authentication code should remain
+// visible to the compiler.
+#[allow(dead_code)]
 pub(crate) async fn rotate(cx: &Cx) -> SessionResult<Option<UserSession>> {
     let Some(current_session) = current(cx).await? else {
         return Ok(None);

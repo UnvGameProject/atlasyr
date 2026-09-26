@@ -33,6 +33,8 @@ impl UserSession {
         }
     }
 
+    // Retained for the session-rotation boundary and lifecycle verification.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn token_hash(&self) -> &[u8; 32] {
         &self.token_hash
     }
@@ -41,6 +43,8 @@ impl UserSession {
         self.user_id
     }
 
+    // Retained for the session-rotation boundary and expiry verification.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn expires_at(&self) -> OffsetDateTime {
         self.expires_at
     }
