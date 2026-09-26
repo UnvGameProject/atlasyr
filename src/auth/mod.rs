@@ -11,4 +11,4 @@ pub(crate) mod session;
 
 pub(crate) use manager::{AuthError, AuthManager, CredentialOutcome};
 
-pub(crate) use request::require_auth;
+pub(crate) use request::{current_identity, require_auth};
