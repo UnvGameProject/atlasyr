@@ -9,6 +9,26 @@ fn scan(source: &str) -> Vec<super::Finding> {
     scan_source(Path::new("src/example.rs"), source).expect("test source should parse")
 }
 
+fn scan_project(sources: &[(&str, &str)]) -> Vec<super::Finding> {
+    let mut index = super::ProjectAuditIndex::default();
+
+    for (path, source) in sources {
+        let file = syn::parse_file(source).expect("test source should parse");
+        index.index_file(Path::new(path), &file);
+    }
+
+    let mut findings = Vec::new();
+
+    for (path, source) in sources {
+        findings.extend(
+            super::scan_source_with_index(Path::new(path), source, Some(&index))
+                .expect("test source should parse"),
+        );
+    }
+
+    findings
+}
+
 #[test]
 fn accepts_static_parameterized_sql() {
     let findings = scan(
@@ -375,5 +395,295 @@ fn warns_when_raw_id_reaches_delete_sink() {
 
     assert!(findings.iter().any(|finding| {
         finding.rule_id == PERSISTENCE_FLOW_UNRECOGNIZED && finding.severity == Severity::Warning
+    }));
+}
+
+#[test]
+fn recognizes_validated_application_use_case() {
+    let findings = scan_project(&[
+        (
+            "src/application/contacts/create.rs",
+            r#"
+            struct CreateContactCommand {
+                name: String,
+                email: String,
+            }
+
+            impl CreateContactCommand {
+                fn new(name: String, email: String) -> Self {
+                    Self { name, email }
+                }
+            }
+
+            async fn create_contact(
+                pool: &PgPool,
+                command: CreateContactCommand,
+            ) {
+                let input = CreateContactInput::from_untrusted(
+                    command.name,
+                    command.email,
+                );
+
+                let input = match input.validate() {
+                    Ok(input) => input,
+                    Err(_) => return,
+                };
+
+                let _ = Contact::create(pool, &input).await;
+            }
+            "#,
+        ),
+        (
+            "src/web/procedures/contacts/create.rs",
+            r#"
+            use crate::application::contacts::create_contact as create_contact_use_case;
+
+            #[procedure]
+            async fn create_contact(
+                pool: &PgPool,
+                name: String,
+                email: String,
+            ) {
+                let command = CreateContactCommand::new(name, email);
+                create_contact_use_case(pool, command).await;
+            }
+            "#,
+        ),
+    ]);
+
+    assert!(findings.iter().any(|finding| {
+        finding.rule_id == PUBLIC_INPUT_AUDITED
+            && finding
+                .detail
+                .contains("name: String -> validated domain input")
+            && finding
+                .detail
+                .contains("email: String -> validated domain input")
+    }));
+
+    assert!(findings.iter().any(|finding| {
+        finding.rule_id == PERSISTENCE_FLOW_AUDITED && finding.severity == Severity::Info
+    }));
+
+    assert!(!findings.iter().any(|finding| {
+        finding.rule_id == PUBLIC_INPUT_UNRECOGNIZED
+            || finding.rule_id == PERSISTENCE_FLOW_UNRECOGNIZED
+    }));
+}
+
+#[test]
+fn application_from_untrusted_without_validation_is_not_enough() {
+    let findings = scan_project(&[
+        (
+            "src/application/contacts/create.rs",
+            r#"
+            struct CreateContactCommand {
+                name: String,
+                email: String,
+            }
+
+            impl CreateContactCommand {
+                fn new(name: String, email: String) -> Self {
+                    Self { name, email }
+                }
+            }
+
+            async fn create_contact(
+                pool: &PgPool,
+                command: CreateContactCommand,
+            ) {
+                let input = CreateContactInput::from_untrusted(
+                    command.name,
+                    command.email,
+                );
+
+                let _ = Contact::create(pool, &input).await;
+            }
+            "#,
+        ),
+        (
+            "src/web/procedures/contacts/create.rs",
+            r#"
+            use crate::application::contacts::create_contact as create_contact_use_case;
+
+            #[procedure]
+            async fn create_contact(
+                pool: &PgPool,
+                name: String,
+                email: String,
+            ) {
+                let command = CreateContactCommand::new(name, email);
+                create_contact_use_case(pool, command).await;
+            }
+            "#,
+        ),
+    ]);
+
+    assert!(findings.iter().any(|finding| {
+        finding.rule_id == PUBLIC_INPUT_UNRECOGNIZED && finding.severity == Severity::Warning
+    }));
+
+    assert!(findings.iter().any(|finding| {
+        finding.rule_id == PERSISTENCE_FLOW_UNRECOGNIZED && finding.severity == Severity::Warning
+    }));
+}
+
+#[test]
+fn arbitrary_application_helper_does_not_protect_public_input() {
+    let findings = scan_project(&[
+        (
+            "src/application/contacts/create.rs",
+            r#"
+            struct CreateContactCommand {
+                name: String,
+                email: String,
+            }
+
+            impl CreateContactCommand {
+                fn new(name: String, email: String) -> Self {
+                    Self { name, email }
+                }
+            }
+
+            async fn create_contact(
+                _pool: &PgPool,
+                command: CreateContactCommand,
+            ) {
+                let _ = command;
+            }
+            "#,
+        ),
+        (
+            "src/web/procedures/contacts/create.rs",
+            r#"
+            use crate::application::contacts::create_contact as create_contact_use_case;
+
+            #[procedure]
+            async fn create_contact(
+                pool: &PgPool,
+                name: String,
+                email: String,
+            ) {
+                let command = CreateContactCommand::new(name, email);
+                create_contact_use_case(pool, command).await;
+            }
+            "#,
+        ),
+    ]);
+
+    assert!(findings.iter().any(|finding| {
+        finding.rule_id == PUBLIC_INPUT_UNRECOGNIZED && finding.severity == Severity::Warning
+    }));
+}
+
+#[test]
+fn validated_application_input_does_not_protect_raw_sink_argument() {
+    let findings = scan_project(&[
+        (
+            "src/application/contacts/create.rs",
+            r#"
+            struct CreateContactCommand {
+                name: String,
+                email: String,
+            }
+
+            impl CreateContactCommand {
+                fn new(name: String, email: String) -> Self {
+                    Self { name, email }
+                }
+            }
+
+            async fn create_contact(
+                pool: &PgPool,
+                command: CreateContactCommand,
+            ) {
+                let input = CreateContactInput::from_untrusted(
+                    command.name,
+                    command.email,
+                );
+
+                let input = match input.validate() {
+                    Ok(input) => input,
+                    Err(_) => return,
+                };
+
+                let _ = &input;
+                let _ = Contact::create(pool, &command.name).await;
+            }
+            "#,
+        ),
+        (
+            "src/web/procedures/contacts/create.rs",
+            r#"
+            use crate::application::contacts::create_contact as create_contact_use_case;
+
+            #[procedure]
+            async fn create_contact(
+                pool: &PgPool,
+                name: String,
+                email: String,
+            ) {
+                let command = CreateContactCommand::new(name, email);
+                create_contact_use_case(pool, command).await;
+            }
+            "#,
+        ),
+    ]);
+
+    assert!(findings.iter().any(|finding| {
+        finding.rule_id == PERSISTENCE_FLOW_UNRECOGNIZED && finding.severity == Severity::Warning
+    }));
+}
+
+#[test]
+fn ambiguous_application_function_fails_closed() {
+    let findings = scan_project(&[
+        (
+            "src/application/contacts/create_a.rs",
+            r#"
+            async fn create_contact(_pool: &PgPool, _command: CreateContactCommand) {}
+            "#,
+        ),
+        (
+            "src/application/contacts/create_b.rs",
+            r#"
+            async fn create_contact(_pool: &PgPool, _command: CreateContactCommand) {}
+            "#,
+        ),
+        (
+            "src/application/contacts/command.rs",
+            r#"
+            struct CreateContactCommand {
+                name: String,
+                email: String,
+            }
+
+            impl CreateContactCommand {
+                fn new(name: String, email: String) -> Self {
+                    Self { name, email }
+                }
+            }
+            "#,
+        ),
+        (
+            "src/web/procedures/contacts/create.rs",
+            r#"
+            use crate::application::contacts::create_contact as create_contact_use_case;
+
+            #[procedure]
+            async fn create_contact(
+                pool: &PgPool,
+                name: String,
+                email: String,
+            ) {
+                let command = CreateContactCommand::new(name, email);
+                create_contact_use_case(pool, command).await;
+            }
+            "#,
+        ),
+    ]);
+
+    assert!(findings.iter().any(|finding| {
+        finding.rule_id == PUBLIC_INPUT_UNRECOGNIZED && finding.severity == Severity::Warning
     }));
 }

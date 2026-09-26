@@ -8,11 +8,11 @@ use clap::{Args, Parser, Subcommand};
 )]
 pub(crate) struct Cli {
     #[command(subcommand)]
-    pub(crate) command: Command,
+    pub(crate) command: CliCommand,
 }
 
 #[derive(Debug, Subcommand)]
-pub(crate) enum Command {
+pub(crate) enum CliCommand {
     #[command(
         name = "migration",
         visible_alias = "make:migration",

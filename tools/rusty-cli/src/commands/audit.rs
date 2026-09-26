@@ -6,7 +6,8 @@ use std::{
 
 use proc_macro2::Span;
 use syn::{
-    Attribute, Expr, ExprCall, FnArg, ItemFn, Lit, Local, Pat, PathArguments, Type,
+    Attribute, Expr, ExprCall, FnArg, ImplItem, Item, ItemFn, Lit, Local, Member, Pat,
+    PathArguments, Stmt, Type, UseTree,
     spanned::Spanned,
     visit::{self, Visit},
 };
@@ -92,6 +93,121 @@ struct PersistenceSinkArgument {
     sources: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+struct SymbolicSource {
+    root: String,
+    fields: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct SymbolicProtection {
+    source: SymbolicSource,
+    boundary: ProtectionBoundary,
+}
+
+#[derive(Debug, Clone)]
+struct FunctionSummary {
+    parameters: Vec<String>,
+    protected_sources: Vec<SymbolicProtection>,
+    persistence_sinks: Vec<FunctionSinkFlow>,
+}
+
+#[derive(Debug, Clone)]
+struct FunctionSinkFlow {
+    name: &'static str,
+    arguments: Vec<FunctionSinkArgument>,
+}
+
+#[derive(Debug, Clone)]
+struct FunctionSinkArgument {
+    role: &'static str,
+    binding: Option<String>,
+    boundary: Option<ProtectionBoundary>,
+    sources: Vec<SymbolicSource>,
+}
+
+#[derive(Debug, Clone)]
+struct ConstructorSummary {
+    field_arguments: HashMap<String, usize>,
+}
+
+#[derive(Default)]
+struct ProjectAuditIndex {
+    functions: HashMap<String, Vec<FunctionSummary>>,
+    constructors: HashMap<String, Vec<ConstructorSummary>>,
+    aliases: HashMap<PathBuf, HashMap<String, String>>,
+}
+
+impl ProjectAuditIndex {
+    fn index_file(&mut self, path: &Path, file: &syn::File) {
+        self.aliases
+            .insert(path.to_path_buf(), collect_use_aliases(file));
+
+        for item in &file.items {
+            match item {
+                Item::Fn(function) if !has_procedure_attribute(&function.attrs) => {
+                    if let Some(summary) = summarize_function(function) {
+                        self.functions
+                            .entry(function.sig.ident.to_string())
+                            .or_default()
+                            .push(summary);
+                    }
+                }
+
+                Item::Impl(item_impl) => {
+                    let Some(owner) = impl_owner_name(&item_impl.self_ty) else {
+                        continue;
+                    };
+
+                    for item in &item_impl.items {
+                        let ImplItem::Fn(method) = item else {
+                            continue;
+                        };
+
+                        let Some(summary) = summarize_constructor(&owner, method) else {
+                            continue;
+                        };
+
+                        let key = format!("{owner}::{}", method.sig.ident);
+
+                        self.constructors.entry(key).or_default().push(summary);
+                    }
+                }
+
+                _ => {}
+            }
+        }
+    }
+
+    fn resolve_function(&self, path: &Path, local_name: &str) -> Option<&FunctionSummary> {
+        let target = self
+            .aliases
+            .get(path)
+            .and_then(|aliases| aliases.get(local_name))
+            .map(String::as_str)
+            .unwrap_or(local_name);
+
+        let candidates = self.functions.get(target)?;
+
+        if candidates.len() == 1 {
+            candidates.first()
+        } else {
+            None
+        }
+    }
+
+    fn resolve_constructor(&self, owner: &str, method: &str) -> Option<&ConstructorSummary> {
+        let key = format!("{owner}::{method}");
+        let candidates = self.constructors.get(&key)?;
+
+        if candidates.len() == 1 {
+            candidates.first()
+        } else {
+            None
+        }
+    }
+}
+
 pub(crate) fn run() -> CommandResult {
     let project = Project::discover()?;
     let src = project.root().join("src");
@@ -101,19 +217,36 @@ pub(crate) fn run() -> CommandResult {
 
     rust_files.sort();
 
-    let mut findings = Vec::new();
+    let mut project_index = ProjectAuditIndex::default();
 
     for path in &rust_files {
         let source = fs::read_to_string(path)?;
-
         let relative = path.strip_prefix(project.root()).unwrap_or(path);
 
-        findings.extend(scan_source(relative, &source).map_err(|error| {
+        let file = syn::parse_file(&source).map_err(|error| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!("could not parse {}: {error}", relative.display()),
             )
-        })?);
+        })?;
+
+        project_index.index_file(relative, &file);
+    }
+
+    let mut findings = Vec::new();
+
+    for path in &rust_files {
+        let source = fs::read_to_string(path)?;
+        let relative = path.strip_prefix(project.root()).unwrap_or(path);
+
+        findings.extend(
+            scan_source_with_index(relative, &source, Some(&project_index)).map_err(|error| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("could not parse {}: {error}", relative.display()),
+                )
+            })?,
+        );
     }
 
     findings.sort_by(|left, right| {
@@ -196,11 +329,21 @@ fn collect_rust_files(directory: &Path, files: &mut Vec<PathBuf>) -> io::Result<
     Ok(())
 }
 
+#[cfg(test)]
 fn scan_source(path: &Path, source: &str) -> syn::Result<Vec<Finding>> {
+    scan_source_with_index(path, source, None)
+}
+
+fn scan_source_with_index(
+    path: &Path,
+    source: &str,
+    project_index: Option<&ProjectAuditIndex>,
+) -> syn::Result<Vec<Finding>> {
     let file = syn::parse_file(source)?;
 
     let mut visitor = AuditVisitor {
         path,
+        project_index,
         findings: Vec::new(),
     };
 
@@ -211,6 +354,7 @@ fn scan_source(path: &Path, source: &str) -> syn::Result<Vec<Finding>> {
 
 struct AuditVisitor<'a> {
     path: &'a Path,
+    project_index: Option<&'a ProjectAuditIndex>,
     findings: Vec<Finding>,
 }
 
@@ -237,7 +381,7 @@ impl AuditVisitor<'_> {
     }
 
     fn audit_procedure(&mut self, function: &ItemFn) {
-        let Some(analysis) = analyze_procedure(function) else {
+        let Some(analysis) = analyze_procedure(function, self.path, self.project_index) else {
             return;
         };
 
@@ -377,7 +521,11 @@ impl<'ast> Visit<'ast> for AuditVisitor<'_> {
     }
 }
 
-fn analyze_procedure(function: &ItemFn) -> Option<ProcedureAnalysis> {
+fn analyze_procedure(
+    function: &ItemFn,
+    path: &Path,
+    project_index: Option<&ProjectAuditIndex>,
+) -> Option<ProcedureAnalysis> {
     if !has_procedure_attribute(&function.attrs) {
         return None;
     }
@@ -394,9 +542,13 @@ fn analyze_procedure(function: &ItemFn) -> Option<ProcedureAnalysis> {
     let external_inputs = inputs.iter().map(|input| input.name.clone()).collect();
 
     let mut flow = ProcedureFlowVisitor {
+        path,
+        project_index,
         external_inputs,
         from_untrusted_bindings: HashMap::new(),
         protected_bindings: HashMap::new(),
+        command_bindings: HashMap::new(),
+        delegated_boundaries: HashMap::new(),
         persistence_sinks: Vec::new(),
     };
 
@@ -465,19 +617,25 @@ fn is_string_type(ty: &Type) -> bool {
     segment.ident == "String" && matches!(segment.arguments, PathArguments::None)
 }
 
-struct ProcedureFlowVisitor {
+struct ProcedureFlowVisitor<'a> {
+    path: &'a Path,
+    project_index: Option<&'a ProjectAuditIndex>,
     external_inputs: HashSet<String>,
     from_untrusted_bindings: HashMap<String, HashSet<String>>,
     protected_bindings: HashMap<String, ProtectedBinding>,
+    command_bindings: HashMap<String, HashMap<String, HashSet<String>>>,
+    delegated_boundaries: HashMap<String, ProtectionBoundary>,
     persistence_sinks: Vec<PersistenceSinkFlow>,
 }
 
-impl ProcedureFlowVisitor {
+impl ProcedureFlowVisitor<'_> {
     fn boundary_for(&self, input: &str) -> Option<ProtectionBoundary> {
-        self.protected_bindings
-            .values()
-            .find(|binding| binding.sources.contains(input))
-            .map(|binding| binding.boundary)
+        self.delegated_boundaries.get(input).copied().or_else(|| {
+            self.protected_bindings
+                .values()
+                .find(|binding| binding.sources.contains(input))
+                .map(|binding| binding.boundary)
+        })
     }
 
     fn record_persistence_sink(&mut self, call: &ExprCall) {
@@ -534,7 +692,189 @@ impl ProcedureFlowVisitor {
     }
 }
 
-impl<'ast> Visit<'ast> for ProcedureFlowVisitor {
+impl ProcedureFlowVisitor<'_> {
+    fn sources_for_expression(&self, expression: &Expr) -> HashSet<String> {
+        let Some(binding) = expression_identifier(expression) else {
+            return HashSet::new();
+        };
+
+        if let Some(protected) = self.protected_bindings.get(&binding) {
+            return protected.sources.clone();
+        }
+
+        if let Some(untrusted) = self.from_untrusted_bindings.get(&binding) {
+            return untrusted.clone();
+        }
+
+        if self.external_inputs.contains(&binding) {
+            return [binding].into_iter().collect();
+        }
+
+        HashSet::new()
+    }
+
+    fn record_command_binding(&mut self, binding: &str, expression: &Expr) {
+        let Some(project_index) = self.project_index else {
+            return;
+        };
+
+        let Expr::Call(call) = peel_expr(expression) else {
+            return;
+        };
+
+        let Expr::Path(function) = call.func.as_ref() else {
+            return;
+        };
+
+        let segments: Vec<_> = function.path.segments.iter().collect();
+
+        if segments.len() < 2 {
+            return;
+        }
+
+        let owner = segments[segments.len() - 2].ident.to_string();
+        let method = segments[segments.len() - 1].ident.to_string();
+
+        let Some(summary) = project_index.resolve_constructor(&owner, &method).cloned() else {
+            return;
+        };
+
+        let mut fields = HashMap::new();
+
+        for (field, argument_index) in summary.field_arguments {
+            let Some(argument) = call.args.iter().nth(argument_index) else {
+                continue;
+            };
+
+            let sources = self.sources_for_expression(argument);
+
+            if !sources.is_empty() {
+                fields.insert(field, sources);
+            }
+        }
+
+        if !fields.is_empty() {
+            self.command_bindings.insert(binding.to_owned(), fields);
+        }
+    }
+
+    fn map_symbolic_source(
+        &self,
+        summary: &FunctionSummary,
+        call: &ExprCall,
+        source: &SymbolicSource,
+    ) -> HashSet<String> {
+        let Some(parameter_index) = summary
+            .parameters
+            .iter()
+            .position(|parameter| parameter == &source.root)
+        else {
+            return HashSet::new();
+        };
+
+        let Some(argument) = call.args.iter().nth(parameter_index) else {
+            return HashSet::new();
+        };
+
+        if source.fields.is_empty() {
+            return self.sources_for_expression(argument);
+        }
+
+        if source.fields.len() != 1 {
+            return HashSet::new();
+        }
+
+        let Some(binding) = expression_identifier(argument) else {
+            return HashSet::new();
+        };
+
+        self.command_bindings
+            .get(&binding)
+            .and_then(|fields| fields.get(&source.fields[0]))
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    fn record_application_call(&mut self, call: &ExprCall) {
+        let Some(project_index) = self.project_index else {
+            return;
+        };
+
+        let Expr::Path(function) = call.func.as_ref() else {
+            return;
+        };
+
+        // This first implementation intentionally follows only imported or
+        // locally named free functions. Associated/external calls remain
+        // outside the trusted interprocedural boundary.
+        if function.path.segments.len() != 1 {
+            return;
+        }
+
+        let local_name = function.path.segments.first().unwrap().ident.to_string();
+
+        let Some(summary) = project_index
+            .resolve_function(self.path, &local_name)
+            .cloned()
+        else {
+            return;
+        };
+
+        if summary.parameters.len() != call.args.len() {
+            return;
+        }
+
+        for protection in &summary.protected_sources {
+            let sources = self.map_symbolic_source(&summary, call, &protection.source);
+
+            for source in sources {
+                if self.external_inputs.contains(&source) {
+                    self.delegated_boundaries
+                        .entry(source)
+                        .or_insert(protection.boundary);
+                }
+            }
+        }
+
+        for sink in &summary.persistence_sinks {
+            let arguments = sink
+                .arguments
+                .iter()
+                .map(|argument| {
+                    let mut sources = HashSet::new();
+
+                    for source in &argument.sources {
+                        sources.extend(self.map_symbolic_source(&summary, call, source));
+                    }
+
+                    let mut sources: Vec<_> = sources.into_iter().collect();
+                    sources.sort();
+
+                    PersistenceSinkArgument {
+                        role: argument.role,
+                        binding: argument.binding.clone(),
+                        boundary: if sources.is_empty() {
+                            None
+                        } else {
+                            argument.boundary
+                        },
+                        sources,
+                    }
+                })
+                .collect();
+
+            self.persistence_sinks.push(PersistenceSinkFlow {
+                name: sink.name,
+                // Report against the procedure call site. The sink itself
+                // lives in another source file.
+                span: call.span(),
+                arguments,
+            });
+        }
+    }
+}
+
+impl<'ast> Visit<'ast> for ProcedureFlowVisitor<'_> {
     fn visit_local(&mut self, node: &'ast Local) {
         let Some(binding) = local_binding_name(&node.pat) else {
             visit::visit_local(self, node);
@@ -542,21 +882,23 @@ impl<'ast> Visit<'ast> for ProcedureFlowVisitor {
         };
 
         if let Some(init) = &node.init {
+            self.record_command_binding(&binding, &init.expr);
+
             if let Some(sources) = from_untrusted_sources(&init.expr, &self.external_inputs) {
                 self.from_untrusted_bindings
                     .insert(binding.clone(), sources.into_iter().collect());
             }
 
-            if let Some(source_binding) = validated_binding_source(&init.expr) {
-                if let Some(sources) = self.from_untrusted_bindings.get(&source_binding).cloned() {
-                    self.protected_bindings.insert(
-                        binding.clone(),
-                        ProtectedBinding {
-                            boundary: ProtectionBoundary::ValidatedDomainInput,
-                            sources,
-                        },
-                    );
-                }
+            if let Some(source_binding) = validated_binding_source(&init.expr)
+                && let Some(sources) = self.from_untrusted_bindings.get(&source_binding).cloned()
+            {
+                self.protected_bindings.insert(
+                    binding.clone(),
+                    ProtectedBinding {
+                        boundary: ProtectionBoundary::ValidatedDomainInput,
+                        sources,
+                    },
+                );
             }
 
             if let Some(source) = uuid_parse_external_source(&init.expr, &self.external_inputs) {
@@ -575,7 +917,337 @@ impl<'ast> Visit<'ast> for ProcedureFlowVisitor {
 
     fn visit_expr_call(&mut self, node: &'ast ExprCall) {
         self.record_persistence_sink(node);
+        self.record_application_call(node);
         visit::visit_expr_call(self, node);
+    }
+}
+
+fn collect_use_aliases(file: &syn::File) -> HashMap<String, String> {
+    let mut aliases = HashMap::new();
+
+    for item in &file.items {
+        let Item::Use(item_use) = item else {
+            continue;
+        };
+
+        collect_use_tree_aliases(&item_use.tree, &mut aliases);
+    }
+
+    aliases
+}
+
+fn collect_use_tree_aliases(tree: &UseTree, aliases: &mut HashMap<String, String>) {
+    match tree {
+        UseTree::Rename(rename) => {
+            aliases.insert(rename.rename.to_string(), rename.ident.to_string());
+        }
+
+        UseTree::Group(group) => {
+            for item in &group.items {
+                collect_use_tree_aliases(item, aliases);
+            }
+        }
+
+        UseTree::Path(path) => {
+            collect_use_tree_aliases(&path.tree, aliases);
+        }
+
+        UseTree::Name(_) | UseTree::Glob(_) => {}
+    }
+}
+
+fn impl_owner_name(ty: &Type) -> Option<String> {
+    let Type::Path(type_path) = ty else {
+        return None;
+    };
+
+    if type_path.qself.is_some() {
+        return None;
+    }
+
+    Some(type_path.path.segments.last()?.ident.to_string())
+}
+
+fn summarize_constructor(owner: &str, method: &syn::ImplItemFn) -> Option<ConstructorSummary> {
+    if method.sig.ident != "new" {
+        return None;
+    }
+
+    let parameters = method_parameter_names(method)?;
+
+    let Stmt::Expr(expression, None) = method.block.stmts.last()? else {
+        return None;
+    };
+
+    let Expr::Struct(structure) = peel_expr(expression) else {
+        return None;
+    };
+
+    if structure.rest.is_some() {
+        return None;
+    }
+
+    let constructed = structure.path.segments.last()?.ident.to_string();
+
+    if constructed != "Self" && constructed != owner {
+        return None;
+    }
+
+    let mut field_arguments = HashMap::new();
+
+    for field in &structure.fields {
+        let Member::Named(field_name) = &field.member else {
+            return None;
+        };
+
+        let source = expression_identifier(&field.expr)?;
+        let argument_index = parameters
+            .iter()
+            .position(|parameter| parameter == &source)?;
+
+        field_arguments.insert(field_name.to_string(), argument_index);
+    }
+
+    if field_arguments.is_empty() {
+        None
+    } else {
+        Some(ConstructorSummary { field_arguments })
+    }
+}
+
+fn method_parameter_names(method: &syn::ImplItemFn) -> Option<Vec<String>> {
+    let mut parameters = Vec::new();
+
+    for argument in &method.sig.inputs {
+        let FnArg::Typed(argument) = argument else {
+            return None;
+        };
+
+        let Pat::Ident(pattern) = argument.pat.as_ref() else {
+            return None;
+        };
+
+        parameters.push(pattern.ident.to_string());
+    }
+
+    Some(parameters)
+}
+
+fn summarize_function(function: &ItemFn) -> Option<FunctionSummary> {
+    let parameters = function_parameter_names(function)?;
+    let parameter_set = parameters.iter().cloned().collect();
+
+    let mut flow = FunctionFlowVisitor {
+        parameters: parameter_set,
+        from_untrusted_bindings: HashMap::new(),
+        protected_bindings: HashMap::new(),
+        persistence_sinks: Vec::new(),
+    };
+
+    flow.visit_block(&function.block);
+
+    let mut protections: HashMap<SymbolicSource, ProtectionBoundary> = HashMap::new();
+
+    for binding in flow.protected_bindings.values() {
+        for source in &binding.sources {
+            protections
+                .entry(source.clone())
+                .or_insert(binding.boundary);
+        }
+    }
+
+    let mut protected_sources: Vec<_> = protections
+        .into_iter()
+        .map(|(source, boundary)| SymbolicProtection { source, boundary })
+        .collect();
+
+    protected_sources.sort_by(|left, right| left.source.cmp(&right.source));
+
+    Some(FunctionSummary {
+        parameters,
+        protected_sources,
+        persistence_sinks: flow.persistence_sinks,
+    })
+}
+
+fn function_parameter_names(function: &ItemFn) -> Option<Vec<String>> {
+    let mut parameters = Vec::new();
+
+    for argument in &function.sig.inputs {
+        let FnArg::Typed(argument) = argument else {
+            return None;
+        };
+
+        let Pat::Ident(pattern) = argument.pat.as_ref() else {
+            return None;
+        };
+
+        parameters.push(pattern.ident.to_string());
+    }
+
+    Some(parameters)
+}
+
+struct SymbolicProtectedBinding {
+    boundary: ProtectionBoundary,
+    sources: HashSet<SymbolicSource>,
+}
+
+struct FunctionFlowVisitor {
+    parameters: HashSet<String>,
+    from_untrusted_bindings: HashMap<String, HashSet<SymbolicSource>>,
+    protected_bindings: HashMap<String, SymbolicProtectedBinding>,
+    persistence_sinks: Vec<FunctionSinkFlow>,
+}
+
+impl FunctionFlowVisitor {
+    fn record_persistence_sink(&mut self, call: &ExprCall) {
+        let Some((name, specifications)) = persistence_sink_spec(call) else {
+            return;
+        };
+
+        let arguments = specifications
+            .into_iter()
+            .map(|(role, index)| {
+                let expression = call.args.iter().nth(index);
+                self.classify_sink_argument(role, expression)
+            })
+            .collect();
+
+        self.persistence_sinks
+            .push(FunctionSinkFlow { name, arguments });
+    }
+
+    fn classify_sink_argument(
+        &self,
+        role: &'static str,
+        expression: Option<&Expr>,
+    ) -> FunctionSinkArgument {
+        let binding = expression.and_then(expression_identifier);
+
+        let mut boundary = None;
+        let mut sources = Vec::new();
+
+        if let Some(binding_name) = binding.as_deref() {
+            if let Some(protected) = self.protected_bindings.get(binding_name) {
+                boundary = Some(protected.boundary);
+                sources.extend(protected.sources.iter().cloned());
+            } else if let Some(untrusted) = self.from_untrusted_bindings.get(binding_name) {
+                sources.extend(untrusted.iter().cloned());
+            }
+        }
+
+        if sources.is_empty()
+            && let Some(expression) = expression
+            && let Some(source) = symbolic_source(expression, &self.parameters)
+        {
+            sources.push(source);
+        }
+
+        sources.sort();
+        sources.dedup();
+
+        FunctionSinkArgument {
+            role,
+            binding,
+            boundary,
+            sources,
+        }
+    }
+}
+
+impl<'ast> Visit<'ast> for FunctionFlowVisitor {
+    fn visit_local(&mut self, node: &'ast Local) {
+        let Some(binding) = local_binding_name(&node.pat) else {
+            visit::visit_local(self, node);
+            return;
+        };
+
+        if let Some(init) = &node.init {
+            if let Some(sources) = from_untrusted_symbolic_sources(&init.expr, &self.parameters) {
+                self.from_untrusted_bindings
+                    .insert(binding.clone(), sources.into_iter().collect());
+            }
+
+            if let Some(source_binding) = validated_binding_source(&init.expr)
+                && let Some(sources) = self.from_untrusted_bindings.get(&source_binding).cloned()
+            {
+                self.protected_bindings.insert(
+                    binding,
+                    SymbolicProtectedBinding {
+                        boundary: ProtectionBoundary::ValidatedDomainInput,
+                        sources,
+                    },
+                );
+            }
+        }
+
+        visit::visit_local(self, node);
+    }
+
+    fn visit_expr_call(&mut self, node: &'ast ExprCall) {
+        self.record_persistence_sink(node);
+        visit::visit_expr_call(self, node);
+    }
+}
+
+fn from_untrusted_symbolic_sources(
+    expression: &Expr,
+    parameters: &HashSet<String>,
+) -> Option<Vec<SymbolicSource>> {
+    let Expr::Call(call) = peel_expr(expression) else {
+        return None;
+    };
+
+    let Expr::Path(function) = call.func.as_ref() else {
+        return None;
+    };
+
+    let last = function.path.segments.last()?;
+
+    if last.ident != "from_untrusted" {
+        return None;
+    }
+
+    Some(
+        call.args
+            .iter()
+            .filter_map(|argument| symbolic_source(argument, parameters))
+            .collect(),
+    )
+}
+
+fn symbolic_source(expression: &Expr, parameters: &HashSet<String>) -> Option<SymbolicSource> {
+    match peel_expr(expression) {
+        Expr::Path(path) => {
+            if path.qself.is_some() || path.path.segments.len() != 1 {
+                return None;
+            }
+
+            let root = path.path.segments.first()?.ident.to_string();
+
+            if !parameters.contains(&root) {
+                return None;
+            }
+
+            Some(SymbolicSource {
+                root,
+                fields: Vec::new(),
+            })
+        }
+
+        Expr::Field(field) => {
+            let mut source = symbolic_source(&field.base, parameters)?;
+
+            let Member::Named(member) = &field.member else {
+                return None;
+            };
+
+            source.fields.push(member.to_string());
+            Some(source)
+        }
+
+        _ => None,
     }
 }
 
@@ -668,7 +1340,7 @@ fn match_returns_ok_value(expression: &syn::ExprMatch) -> bool {
             return false;
         };
 
-        expression_identifier(&arm.body).is_some_and(|body| body == value.ident.to_string())
+        expression_identifier(&arm.body).is_some_and(|body| value.ident == body)
     })
 }
 
@@ -705,13 +1377,12 @@ struct UuidParseVisitor<'a> {
 
 impl<'ast> Visit<'ast> for UuidParseVisitor<'_> {
     fn visit_expr_call(&mut self, node: &'ast ExprCall) {
-        if self.source.is_none() {
-            if let Some(source) = uuid_parse_source(node) {
-                if self.external_inputs.contains(&source) {
-                    self.source = Some(source);
-                    return;
-                }
-            }
+        if self.source.is_none()
+            && let Some(source) = uuid_parse_source(node)
+            && self.external_inputs.contains(&source)
+        {
+            self.source = Some(source);
+            return;
         }
 
         visit::visit_expr_call(self, node);

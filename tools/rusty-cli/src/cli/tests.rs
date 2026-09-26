@@ -1,13 +1,13 @@
 use clap::Parser;
 
-use super::{Cli, Command};
+use super::{Cli, CliCommand};
 
 #[test]
 fn make_test_accepts_existing_module_form() {
     let cli = Cli::try_parse_from(["rusty", "make:test", "domain/contact", "create"])
         .expect("normal make:test syntax should parse");
 
-    let Command::MakeTest(args) = cli.command else {
+    let CliCommand::MakeTest(args) = cli.command else {
         panic!("expected make:test command");
     };
 
@@ -21,7 +21,7 @@ fn make_test_view_accepts_module_without_test_name() {
     let cli = Cli::try_parse_from(["rusty", "make:test", "--view", "web/pages/contacts"])
         .expect("--view syntax should parse without a test name");
 
-    let Command::MakeTest(args) = cli.command else {
+    let CliCommand::MakeTest(args) = cli.command else {
         panic!("expected make:test command");
     };
 
@@ -54,5 +54,5 @@ fn make_test_view_rejects_test_name() {
 fn audit_command_parses() {
     let cli = Cli::try_parse_from(["rusty", "audit"]).expect("audit command should parse");
 
-    assert!(matches!(cli.command, Command::Audit));
+    assert!(matches!(cli.command, CliCommand::Audit));
 }
