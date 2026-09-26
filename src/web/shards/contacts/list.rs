@@ -8,10 +8,10 @@ use topcoat::{
 
 use crate::db::models::contact::Contact;
 
-use super::row::contact_row;
+use crate::web::components::contacts::contact_row;
 
 #[shard]
-pub(super) async fn contact_list(cx: &Cx, refresh: Signal<f64>) -> Result<impl View> {
+pub(in crate::web) async fn contact_list(cx: &Cx, refresh: Signal<f64>) -> Result<impl View> {
     // Track this signal on the server. Incrementing it causes only this shard
     // to re-render.
     let _ = refresh.get();

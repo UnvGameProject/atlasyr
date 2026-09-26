@@ -5,10 +5,10 @@ use topcoat::{
     view::{View, component, view},
 };
 
-use super::{delete::delete_contact, update::update_contact};
+use crate::web::procedures::contacts::{delete_contact, update_contact};
 
 #[component]
-pub(super) async fn contact_row(
+pub(in crate::web) async fn contact_row(
     cx: &Cx,
     id: String,
     initial_name: String,

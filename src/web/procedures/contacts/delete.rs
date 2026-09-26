@@ -9,7 +9,7 @@ use uuid::Uuid;
 use crate::{db::models::contact::Contact, domain::contact::ContactError};
 
 #[procedure]
-pub(super) async fn delete_contact(
+pub(in crate::web) async fn delete_contact(
     cx: &Cx,
     id: String,
 ) -> Result<std::result::Result<String, String>> {

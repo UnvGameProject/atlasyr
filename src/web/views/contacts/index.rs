@@ -4,11 +4,11 @@ use topcoat::{
     view::{View, view},
 };
 
-use super::{
-    create_form::contact_create_form, list::contact_list, view_model::ContactsIndexViewModel,
-};
+use crate::web::{components::contacts::contact_create_form, shards::contacts::contact_list};
 
-pub(super) async fn contacts_index(
+use super::view_model::ContactsIndexViewModel;
+
+pub(in crate::web) async fn contacts_index(
     cx: &Cx,
     view_model: ContactsIndexViewModel,
 ) -> Result<impl View> {

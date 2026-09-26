@@ -1,18 +1,6 @@
 use topcoat::{Result, context::Cx, router::page, runtime::signal, view::View};
 
-use self::{index::contacts_index, view_model::ContactsIndexViewModel};
-
-mod create;
-mod create_form;
-mod delete;
-mod index;
-mod list;
-mod row;
-#[cfg(test)]
-mod tests;
-mod update;
-mod validation;
-mod view_model;
+use crate::web::views::contacts::{ContactsIndexViewModel, contacts_index};
 
 #[page("/contacts")]
 async fn contacts(cx: &Cx) -> Result<impl View> {

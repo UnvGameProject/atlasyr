@@ -14,7 +14,7 @@ use crate::{
 use super::validation::validation_outcome;
 
 #[procedure]
-pub(super) async fn update_contact(
+pub(in crate::web) async fn update_contact(
     cx: &Cx,
     id: String,
     name: String,

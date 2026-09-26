@@ -4,10 +4,10 @@ use topcoat::{
     view::{View, component, view},
 };
 
-use super::create::create_contact;
+use crate::web::procedures::contacts::create_contact;
 
 #[component]
-pub(super) async fn contact_create_form(
+pub(in crate::web) async fn contact_create_form(
     name: &Signal<String>,
     email: &Signal<String>,
     status: &Signal<String>,

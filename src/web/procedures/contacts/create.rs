@@ -13,7 +13,7 @@ use crate::{
 use super::validation::validation_outcome;
 
 #[procedure]
-pub(super) async fn create_contact(cx: &Cx, name: String, email: String) -> Result<String> {
+pub(in crate::web) async fn create_contact(cx: &Cx, name: String, email: String) -> Result<String> {
     let input = CreateContactInput::from_untrusted(name, email);
 
     let input = match input.validate() {
