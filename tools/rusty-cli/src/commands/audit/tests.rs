@@ -800,3 +800,194 @@ fn ambiguous_application_function_fails_closed() {
         finding.rule_id == PUBLIC_INPUT_UNRECOGNIZED && finding.severity == Severity::Warning
     }));
 }
+
+#[test]
+fn recognizes_credential_verification_in_application_use_case() {
+    let findings = scan_project(&[
+        (
+            "src/application/auth/authenticate.rs",
+            r#"
+            struct AuthManager;
+            struct PgPool;
+            struct IpAddr;
+
+            struct AuthenticateUserCommand {
+                email: String,
+                password: String,
+                client_ip: Option<IpAddr>,
+            }
+
+            impl AuthenticateUserCommand {
+                fn new(
+                    email: String,
+                    password: String,
+                    client_ip: Option<IpAddr>,
+                ) -> Self {
+                    Self {
+                        email,
+                        password,
+                        client_ip,
+                    }
+                }
+            }
+
+            impl AuthManager {
+                async fn authenticate(
+                    &self,
+                    _pool: &PgPool,
+                    _email: String,
+                    _password: String,
+                    _client_ip: Option<IpAddr>,
+                ) {
+                }
+            }
+
+            async fn authenticate_user(
+                auth: &AuthManager,
+                pool: &PgPool,
+                command: AuthenticateUserCommand,
+            ) {
+                auth.authenticate(
+                    pool,
+                    command.email,
+                    command.password,
+                    command.client_ip,
+                )
+                .await;
+            }
+            "#,
+        ),
+        (
+            "src/web/procedures/auth/login.rs",
+            r#"
+            use crate::application::auth::{
+                AuthenticateUserCommand,
+                authenticate_user as authenticate_user_use_case,
+            };
+
+            #[procedure]
+            async fn login(
+                cx: &Cx,
+                email: String,
+                password: String,
+            ) {
+                let auth = app_context::<AuthManager>(cx);
+                let pool = app_context::<PgPool>(cx);
+
+                let command = AuthenticateUserCommand::new(
+                    email,
+                    password,
+                    None,
+                );
+
+                authenticate_user_use_case(
+                    auth,
+                    pool,
+                    command,
+                )
+                .await;
+            }
+            "#,
+        ),
+    ]);
+
+    assert!(findings.iter().any(|finding| {
+        finding.rule_id == PUBLIC_INPUT_AUDITED
+            && finding
+                .detail
+                .contains("email: String -> credential verification")
+            && finding
+                .detail
+                .contains("password: String -> credential verification")
+    }));
+
+    assert!(
+        !findings
+            .iter()
+            .any(|finding| { finding.rule_id == PUBLIC_INPUT_UNRECOGNIZED })
+    );
+}
+
+#[test]
+fn fake_authentication_use_case_fails_closed() {
+    let findings = scan_project(&[
+        (
+            "src/application/auth/authenticate.rs",
+            r#"
+            struct AuthManager;
+            struct PgPool;
+            struct IpAddr;
+
+            struct AuthenticateUserCommand {
+                email: String,
+                password: String,
+                client_ip: Option<IpAddr>,
+            }
+
+            impl AuthenticateUserCommand {
+                fn new(
+                    email: String,
+                    password: String,
+                    client_ip: Option<IpAddr>,
+                ) -> Self {
+                    Self {
+                        email,
+                        password,
+                        client_ip,
+                    }
+                }
+            }
+
+            async fn authenticate_user(
+                _auth: &AuthManager,
+                _pool: &PgPool,
+                command: AuthenticateUserCommand,
+            ) {
+                // Naming the function correctly is insufficient.
+                // No AuthManager::authenticate credential proof occurs.
+                let _ = command;
+            }
+            "#,
+        ),
+        (
+            "src/web/procedures/auth/login.rs",
+            r#"
+            use crate::application::auth::{
+                AuthenticateUserCommand,
+                authenticate_user as authenticate_user_use_case,
+            };
+
+            #[procedure]
+            async fn login(
+                cx: &Cx,
+                email: String,
+                password: String,
+            ) {
+                let auth = app_context::<AuthManager>(cx);
+                let pool = app_context::<PgPool>(cx);
+
+                let command = AuthenticateUserCommand::new(
+                    email,
+                    password,
+                    None,
+                );
+
+                authenticate_user_use_case(
+                    auth,
+                    pool,
+                    command,
+                )
+                .await;
+            }
+            "#,
+        ),
+    ]);
+
+    assert!(findings.iter().any(|finding| {
+        finding.rule_id == PUBLIC_INPUT_UNRECOGNIZED && finding.detail.contains("`email`")
+    }));
+
+    assert!(findings.iter().any(|finding| {
+        finding.rule_id == PUBLIC_INPUT_UNRECOGNIZED && finding.detail.contains("`password`")
+    }));
+}

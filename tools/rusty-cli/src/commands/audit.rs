@@ -6,8 +6,8 @@ use std::{
 
 use proc_macro2::Span;
 use syn::{
-    Attribute, Expr, ExprCall, FnArg, ImplItem, Item, ItemFn, Lit, Local, Member, Pat,
-    PathArguments, Stmt, Type, UseTree,
+    Attribute, Expr, ExprCall, ExprMethodCall, FnArg, ImplItem, Item, ItemFn, Lit, Local, Member,
+    Pat, PathArguments, Stmt, Type, UseTree,
     spanned::Spanned,
     visit::{self, Visit},
 };
@@ -53,6 +53,7 @@ struct Finding {
 enum ProtectionBoundary {
     ValidatedDomainInput,
     UuidParse,
+    CredentialVerification,
 }
 
 impl ProtectionBoundary {
@@ -60,6 +61,7 @@ impl ProtectionBoundary {
         match self {
             Self::ValidatedDomainInput => "validated domain input",
             Self::UuidParse => "UUID parser",
+            Self::CredentialVerification => "credential verification",
         }
     }
 }
@@ -1041,6 +1043,8 @@ fn summarize_function(function: &ItemFn) -> Option<FunctionSummary> {
         parameters: parameter_set,
         from_untrusted_bindings: HashMap::new(),
         protected_bindings: HashMap::new(),
+        credential_sources: HashSet::new(),
+        credential_verification_enabled: is_authentication_use_case(function),
         persistence_sinks: Vec::new(),
     };
 
@@ -1054,6 +1058,12 @@ fn summarize_function(function: &ItemFn) -> Option<FunctionSummary> {
                 .entry(source.clone())
                 .or_insert(binding.boundary);
         }
+    }
+
+    for source in &flow.credential_sources {
+        protections
+            .entry(source.clone())
+            .or_insert(ProtectionBoundary::CredentialVerification);
     }
 
     let mut protected_sources: Vec<_> = protections
@@ -1093,14 +1103,123 @@ struct SymbolicProtectedBinding {
     sources: HashSet<SymbolicSource>,
 }
 
+fn is_authentication_use_case(function: &ItemFn) -> bool {
+    if function.sig.ident != "authenticate_user" {
+        return false;
+    }
+
+    let mut parameter_types = HashMap::new();
+
+    for argument in &function.sig.inputs {
+        let FnArg::Typed(argument) = argument else {
+            return false;
+        };
+
+        let Pat::Ident(pattern) = argument.pat.as_ref() else {
+            return false;
+        };
+
+        let Some(type_name) = simple_type_name(&argument.ty) else {
+            return false;
+        };
+
+        parameter_types.insert(pattern.ident.to_string(), type_name);
+    }
+
+    parameter_types
+        .get("auth")
+        .is_some_and(|name| name == "AuthManager")
+        && parameter_types
+            .get("pool")
+            .is_some_and(|name| name == "PgPool")
+        && parameter_types
+            .get("command")
+            .is_some_and(|name| name == "AuthenticateUserCommand")
+}
+
+fn simple_type_name(ty: &Type) -> Option<String> {
+    match ty {
+        Type::Reference(reference) => simple_type_name(&reference.elem),
+
+        Type::Path(path) if path.qself.is_none() => {
+            Some(path.path.segments.last()?.ident.to_string())
+        }
+
+        _ => None,
+    }
+}
+
+fn is_symbolic_field(source: &SymbolicSource, root: &str, field: &str) -> bool {
+    source.root == root && source.fields.len() == 1 && source.fields[0] == field
+}
+
 struct FunctionFlowVisitor {
     parameters: HashSet<String>,
     from_untrusted_bindings: HashMap<String, HashSet<SymbolicSource>>,
     protected_bindings: HashMap<String, SymbolicProtectedBinding>,
+    credential_sources: HashSet<SymbolicSource>,
+    credential_verification_enabled: bool,
     persistence_sinks: Vec<FunctionSinkFlow>,
 }
 
 impl FunctionFlowVisitor {
+    fn record_credential_verification(&mut self, call: &ExprMethodCall) {
+        if !self.credential_verification_enabled
+            || call.method != "authenticate"
+            || call.args.len() != 4
+        {
+            return;
+        }
+
+        if expression_identifier(&call.receiver).as_deref() != Some("auth") {
+            return;
+        }
+
+        let mut arguments = call.args.iter();
+
+        let Some(pool) = arguments.next() else {
+            return;
+        };
+
+        let Some(email) = arguments.next() else {
+            return;
+        };
+
+        let Some(password) = arguments.next() else {
+            return;
+        };
+
+        let Some(client_ip) = arguments.next() else {
+            return;
+        };
+
+        if arguments.next().is_some() || expression_identifier(pool).as_deref() != Some("pool") {
+            return;
+        }
+
+        let Some(email) = symbolic_source(email, &self.parameters) else {
+            return;
+        };
+
+        let Some(password) = symbolic_source(password, &self.parameters) else {
+            return;
+        };
+
+        let Some(client_ip) = symbolic_source(client_ip, &self.parameters) else {
+            return;
+        };
+
+        if !is_symbolic_field(&email, "command", "email")
+            || !is_symbolic_field(&password, "command", "password")
+            || !is_symbolic_field(&client_ip, "command", "client_ip")
+        {
+            return;
+        }
+
+        self.credential_sources.insert(email);
+        self.credential_sources.insert(password);
+    }
+
     fn record_persistence_sink(&mut self, call: &ExprCall) {
         let Some((name, specifications)) = persistence_sink_spec(call) else {
             return;
@@ -1193,6 +1312,11 @@ impl<'ast> Visit<'ast> for FunctionFlowVisitor {
         }
 
         visit::visit_local(self, node);
+    }
+
+    fn visit_expr_method_call(&mut self, node: &'ast ExprMethodCall) {
+        self.record_credential_verification(node);
+        visit::visit_expr_method_call(self, node);
     }
 
     fn visit_expr_call(&mut self, node: &'ast ExprCall) {
