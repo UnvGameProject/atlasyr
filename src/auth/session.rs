@@ -11,7 +11,7 @@ use topcoat::{
 };
 use uuid::Uuid;
 
-use crate::db::models::user_session::UserSession;
+use crate::{auth::AuthManager, db::models::user_session::UserSession};
 
 pub(crate) type SessionResult<T> = Result<T, SessionError>;
 
@@ -35,6 +35,7 @@ impl Error for SessionError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Framework(error) => error.chain().next(),
+
             Self::Storage(error) => Some(error),
         }
     }
@@ -54,6 +55,9 @@ impl From<sqlx::Error> for SessionError {
 
 /// Start a fresh Topcoat session and bind its persisted representation
 /// to the authenticated application user.
+///
+/// Topcoat's lifetime is configured by the active auth driver as the
+/// application's sliding inactivity timeout.
 ///
 /// If persistence fails after Topcoat issued the client token, make a
 /// best-effort attempt to discard that token before returning the error.
@@ -76,8 +80,12 @@ pub(crate) async fn start(cx: &Cx, user_id: Uuid) -> SessionResult<UserSession> 
 /// Resolve the current Topcoat token against application-owned session
 /// storage.
 ///
-/// A valid client token is not sufficient for authentication: the
-/// corresponding database record must also exist and be unexpired.
+/// A valid client token is not sufficient for authentication. The persisted
+/// row must exist, remain inside its sliding expiry, and remain inside the
+/// auth driver's absolute session lifetime.
+///
+/// Stale client tokens are actively discarded rather than merely returning
+/// an unauthenticated result.
 pub(crate) async fn current(cx: &Cx) -> SessionResult<Option<UserSession>> {
     let Some(token_hash) = topcoat_session::token_hash(cx).await? else {
         return Ok(None);
@@ -85,23 +93,40 @@ pub(crate) async fn current(cx: &Cx) -> SessionResult<Option<UserSession>> {
 
     let token_hash = token_hash_bytes(&token_hash);
 
-    Ok(UserSession::find_active(pool(cx), &token_hash).await?)
+    let Some(session) = UserSession::find_active(pool(cx), &token_hash).await? else {
+        revoke_known_token(cx, &token_hash).await?;
+
+        return Ok(None);
+    };
+
+    if auth(cx).session_is_absolutely_expired(session.created_at(), OffsetDateTime::now_utc()) {
+        revoke_known_token(cx, &token_hash).await?;
+
+        return Ok(None);
+    }
+
+    Ok(Some(session))
 }
 
 /// Extend the current authenticated session.
 ///
-/// The application database remains authoritative: an expired or missing
-/// persisted session cannot be refreshed.
+/// Topcoat proposes the new sliding expiry. The active auth driver caps that
+/// value at the application's absolute session deadline before persistence.
+///
+/// The application database remains authoritative: an expired, missing, or
+/// absolute-timeout session cannot be refreshed.
 pub(crate) async fn refresh(cx: &Cx) -> SessionResult<Option<UserSession>> {
-    if current(cx).await?.is_none() {
+    let Some(current_session) = current(cx).await? else {
         return Ok(None);
-    }
+    };
 
     let Some(framework_session) = topcoat_session::refresh(cx).await? else {
         return Ok(None);
     };
 
-    let (token_hash, expires_at) = session_parts(framework_session);
+    let (token_hash, proposed_expires_at) = session_parts(framework_session);
+
+    let expires_at = auth(cx).cap_session_expiry(current_session.created_at(), proposed_expires_at);
 
     match UserSession::update_expiry(pool(cx), &token_hash, expires_at).await {
         Ok(Some(session)) => Ok(Some(session)),
@@ -126,11 +151,12 @@ pub(crate) async fn refresh(cx: &Cx) -> SessionResult<Option<UserSession>> {
 /// rotation event.
 ///
 /// The application row is re-keyed from Topcoat's explicitly revoked hash
-/// to the replacement hash.
+/// to the replacement hash. Rotation cannot extend the session beyond its
+/// original absolute deadline.
 pub(crate) async fn rotate(cx: &Cx) -> SessionResult<Option<UserSession>> {
-    if current(cx).await?.is_none() {
+    let Some(current_session) = current(cx).await? else {
         return Ok(None);
-    }
+    };
 
     let Some(rotation) = topcoat_session::rotate(cx).await? else {
         return Ok(None);
@@ -138,7 +164,9 @@ pub(crate) async fn rotate(cx: &Cx) -> SessionResult<Option<UserSession>> {
 
     let revoked = token_hash_bytes(&rotation.revoked);
 
-    let (replacement, expires_at) = session_parts(rotation.session);
+    let (replacement, proposed_expires_at) = session_parts(rotation.session);
+
+    let expires_at = auth(cx).cap_session_expiry(current_session.created_at(), proposed_expires_at);
 
     match UserSession::replace_token(pool(cx), &revoked, &replacement, expires_at).await {
         Ok(Some(session)) => Ok(Some(session)),
@@ -165,10 +193,10 @@ pub(crate) async fn rotate(cx: &Cx) -> SessionResult<Option<UserSession>> {
     }
 }
 
-/// Revoke the application-owned session before discarding the client token.
+/// Revoke the application-owned session and discard the client token.
 ///
-/// Doing the database deletion first means a successful logout cannot leave
-/// a server-side session usable by another copy of the same raw token.
+/// Both operations are attempted. If persistence fails, the framework token
+/// is still discarded on the current client as a fail-closed best effort.
 pub(crate) async fn stop(cx: &Cx) -> SessionResult<bool> {
     let Some(token_hash) = topcoat_session::token_hash(cx).await? else {
         topcoat_session::stop(cx).await?;
@@ -178,15 +206,36 @@ pub(crate) async fn stop(cx: &Cx) -> SessionResult<bool> {
 
     let token_hash = token_hash_bytes(&token_hash);
 
-    let deleted = UserSession::delete(pool(cx), &token_hash).await?;
+    revoke_known_token(cx, &token_hash).await
+}
 
-    topcoat_session::stop(cx).await?;
+async fn revoke_known_token(cx: &Cx, token_hash: &[u8; 32]) -> SessionResult<bool> {
+    let storage_result = UserSession::delete(pool(cx), token_hash).await;
 
-    Ok(deleted)
+    let framework_result = topcoat_session::stop(cx).await;
+
+    match storage_result {
+        Ok(deleted) => {
+            framework_result?;
+
+            Ok(deleted)
+        }
+
+        Err(error) => {
+            // We still attempted framework invalidation above.
+            let _ = framework_result;
+
+            Err(SessionError::Storage(error))
+        }
+    }
 }
 
 fn pool(cx: &Cx) -> &PgPool {
     app_context::<PgPool>(cx)
+}
+
+fn auth(cx: &Cx) -> &AuthManager {
+    app_context::<AuthManager>(cx)
 }
 
 fn session_parts(session: Session) -> ([u8; 32], OffsetDateTime) {

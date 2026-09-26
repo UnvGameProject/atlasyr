@@ -95,6 +95,7 @@ services:
       DB_NAME: topcoat_poc
       DB_USER: topcoat_app
       DB_PASSWORD_FILE: /run/secrets/postgres_app_password
+      AUTH_DRIVER: local-topcoat
     secrets:
       - postgres_app_password
     ports:
