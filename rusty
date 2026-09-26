@@ -12,7 +12,7 @@ GID_VALUE="$(id -g)"
 docker compose \
     --project-directory "$PROJECT_ROOT" \
     -f "$PROJECT_ROOT/compose.yaml" \
-    up -d rusty >/dev/null
+    up -d --build rusty >/dev/null
 
 if [ -t 0 ] && [ -t 1 ]; then
     exec docker compose \
