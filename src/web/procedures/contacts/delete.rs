@@ -4,28 +4,23 @@ use topcoat::{
     context::{Cx, app_context},
     runtime::procedure,
 };
-use uuid::Uuid;
 
-use crate::{db::models::contact::Contact, domain::contact::ContactError};
+use crate::application::contacts::{
+    DeleteContactCommand, DeleteContactOutcome, delete_contact as delete_contact_use_case,
+};
 
 #[procedure]
 pub(in crate::web) async fn delete_contact(
     cx: &Cx,
     id: String,
 ) -> Result<std::result::Result<String, String>> {
-    let id = match Uuid::parse_str(&id) {
-        Ok(id) => id,
-        Err(_) => {
-            return Ok(Err("not_found".to_owned()));
-        }
-    };
-
     let pool = app_context::<PgPool>(cx);
+    let command = DeleteContactCommand::new(id);
 
-    match Contact::delete(pool, id).await {
-        Ok(()) => Ok(Ok("deleted".to_owned())),
+    match delete_contact_use_case(pool, command).await {
+        Ok(DeleteContactOutcome::Deleted) => Ok(Ok("deleted".to_owned())),
 
-        Err(ContactError::NotFound) => Ok(Err("not_found".to_owned())),
+        Ok(DeleteContactOutcome::NotFound) => Ok(Err("not_found".to_owned())),
 
         Err(error) => {
             eprintln!("contact deletion failed: {error:?}");
