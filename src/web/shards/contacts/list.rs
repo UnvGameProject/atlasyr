@@ -6,9 +6,7 @@ use topcoat::{
     view::{View, view},
 };
 
-use crate::db::models::contact::Contact;
-
-use crate::web::components::contacts::contact_row;
+use crate::{application::contacts::list_contacts, web::components::contacts::contact_row};
 
 #[shard]
 pub(in crate::web) async fn contact_list(cx: &Cx, refresh: Signal<f64>) -> Result<impl View> {
@@ -17,7 +15,7 @@ pub(in crate::web) async fn contact_list(cx: &Cx, refresh: Signal<f64>) -> Resul
     let _ = refresh.get();
 
     let pool = app_context::<PgPool>(cx);
-    let contact_rows = Contact::find_all(pool).await?;
+    let contact_rows = list_contacts(pool).await?;
 
     Ok(view! {
         <div>
