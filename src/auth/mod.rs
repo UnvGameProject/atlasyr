@@ -1,5 +1,3 @@
-// TODO(auth): Remove this temporary lint allowance once the auth subsystem
-// is wired through the public login/session entrypoints.
 mod driver;
 mod manager;
 mod request;
