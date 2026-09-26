@@ -3,7 +3,6 @@ use std::{
     fmt::{self, Debug, Display, Formatter},
 };
 
-use garde::Validate;
 use sqlx::PgPool;
 
 use crate::{
