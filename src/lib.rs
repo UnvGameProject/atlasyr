@@ -26,3 +26,39 @@ pub async fn run_migrations() -> AppResult<()> {
 
     Ok(())
 }
+
+pub async fn run_create_user(email: String, password: String) -> AppResult<()> {
+    use std::io::{Error as IoError, ErrorKind};
+
+    use application::auth::{CreateUserCommand, CreateUserOutcome, create_user};
+
+    let database_config = config::DatabaseConfig::load()?;
+
+    let database = db::connect(&database_config, "topcoat-poc-create-user").await?;
+
+    db::healthcheck(&database).await?;
+
+    let result = create_user(&database, CreateUserCommand::new(email, password)).await;
+
+    database.close().await;
+
+    match result? {
+        CreateUserOutcome::Created => Ok(()),
+
+        CreateUserOutcome::InvalidEmail => {
+            Err(IoError::new(ErrorKind::InvalidInput, "email address is invalid").into())
+        }
+
+        CreateUserOutcome::InvalidPassword => Err(IoError::new(
+            ErrorKind::InvalidInput,
+            "password must not be empty and must be at most 1024 bytes",
+        )
+        .into()),
+
+        CreateUserOutcome::EmailAlreadyExists => Err(IoError::new(
+            ErrorKind::AlreadyExists,
+            "a user with this email already exists",
+        )
+        .into()),
+    }
+}
