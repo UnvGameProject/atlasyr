@@ -1,3 +1,5 @@
+use crate::auth::require_auth;
+
 use sqlx::PgPool;
 use topcoat::{
     Result,
@@ -12,6 +14,8 @@ use crate::application::contacts::{
 
 #[procedure]
 pub(in crate::web) async fn create_contact(cx: &Cx, name: String, email: String) -> Result<String> {
+    require_auth(cx).await?;
+
     let pool = app_context::<PgPool>(cx);
     let command = CreateContactCommand::new(name, email);
 

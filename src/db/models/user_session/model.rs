@@ -16,6 +16,23 @@ pub(crate) struct UserSession {
 }
 
 impl UserSession {
+    #[cfg(test)]
+    pub(crate) fn for_auth_request_test(
+        token_hash: [u8; 32],
+        user_id: Uuid,
+        expires_at: OffsetDateTime,
+        created_at: OffsetDateTime,
+        updated_at: OffsetDateTime,
+    ) -> Self {
+        Self {
+            token_hash,
+            user_id,
+            expires_at,
+            created_at,
+            updated_at,
+        }
+    }
+
     pub(crate) fn token_hash(&self) -> &[u8; 32] {
         &self.token_hash
     }

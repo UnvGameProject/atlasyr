@@ -4,8 +4,11 @@
 
 mod driver;
 mod manager;
+mod request;
 
 pub(crate) mod password;
 pub(crate) mod session;
 
 pub(crate) use manager::{AuthError, AuthManager, CredentialOutcome};
+
+pub(crate) use request::require_auth;

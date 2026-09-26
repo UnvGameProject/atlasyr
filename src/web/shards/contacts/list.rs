@@ -1,3 +1,5 @@
+use crate::auth::require_auth;
+
 use sqlx::PgPool;
 use topcoat::{
     Result,
@@ -10,6 +12,8 @@ use crate::{application::contacts::list_contacts, web::components::contacts::con
 
 #[shard]
 pub(in crate::web) async fn contact_list(cx: &Cx, refresh: Signal<f64>) -> Result<impl View> {
+    require_auth(cx).await?;
+
     // Track this signal on the server. Incrementing it causes only this shard
     // to re-render.
     let _ = refresh.get();

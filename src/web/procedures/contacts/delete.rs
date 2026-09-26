@@ -1,3 +1,5 @@
+use crate::auth::require_auth;
+
 use sqlx::PgPool;
 use topcoat::{
     Result,
@@ -14,6 +16,8 @@ pub(in crate::web) async fn delete_contact(
     cx: &Cx,
     id: String,
 ) -> Result<std::result::Result<String, String>> {
+    require_auth(cx).await?;
+
     let pool = app_context::<PgPool>(cx);
     let command = DeleteContactCommand::new(id);
 

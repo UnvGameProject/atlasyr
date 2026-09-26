@@ -1,9 +1,13 @@
+use crate::auth::require_auth;
+
 use topcoat::{Result, context::Cx, router::page, runtime::signal, view::View};
 
 use crate::web::views::contacts::{ContactsIndexViewModel, contacts_index};
 
 #[page("/contacts")]
 async fn contacts(cx: &Cx) -> Result<impl View> {
+    require_auth(cx).await?;
+
     let view_model = ContactsIndexViewModel {
         name: signal(cx, String::new),
         email: signal(cx, String::new),
