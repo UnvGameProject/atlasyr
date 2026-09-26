@@ -1173,10 +1173,20 @@ impl<'ast> Visit<'ast> for FunctionFlowVisitor {
                 && let Some(sources) = self.from_untrusted_bindings.get(&source_binding).cloned()
             {
                 self.protected_bindings.insert(
-                    binding,
+                    binding.clone(),
                     SymbolicProtectedBinding {
                         boundary: ProtectionBoundary::ValidatedDomainInput,
                         sources,
+                    },
+                );
+            }
+
+            if let Some(source) = uuid_parse_symbolic_source(&init.expr, &self.parameters) {
+                self.protected_bindings.insert(
+                    binding,
+                    SymbolicProtectedBinding {
+                        boundary: ProtectionBoundary::UuidParse,
+                        sources: [source].into_iter().collect(),
                     },
                 );
             }
@@ -1356,6 +1366,46 @@ fn expression_identifier(expression: &Expr) -> Option<String> {
     Some(path.path.segments.first()?.ident.to_string())
 }
 
+fn uuid_parse_symbolic_source(
+    expression: &Expr,
+    parameters: &HashSet<String>,
+) -> Option<SymbolicSource> {
+    let mut visitor = SymbolicUuidParseVisitor {
+        parameters,
+        source: None,
+    };
+
+    visitor.visit_expr(expression);
+
+    visitor.source
+}
+
+struct SymbolicUuidParseVisitor<'a> {
+    parameters: &'a HashSet<String>,
+    source: Option<SymbolicSource>,
+}
+
+impl<'ast> Visit<'ast> for SymbolicUuidParseVisitor<'_> {
+    fn visit_expr_call(&mut self, node: &'ast ExprCall) {
+        if self.source.is_none()
+            && is_uuid_parse_call(node)
+            && let Some(argument) = node.args.first()
+        {
+            let argument = match peel_expr(argument) {
+                Expr::Reference(reference) => reference.expr.as_ref(),
+                expression => expression,
+            };
+
+            if let Some(source) = symbolic_source(argument, self.parameters) {
+                self.source = Some(source);
+                return;
+            }
+        }
+
+        visit::visit_expr_call(self, node);
+    }
+}
+
 fn uuid_parse_external_source(
     expression: &Expr,
     external_inputs: &HashSet<String>,
@@ -1390,24 +1440,28 @@ impl<'ast> Visit<'ast> for UuidParseVisitor<'_> {
 }
 
 fn uuid_parse_source(call: &ExprCall) -> Option<String> {
-    let Expr::Path(function) = call.func.as_ref() else {
+    if !is_uuid_parse_call(call) {
         return None;
+    }
+
+    expression_identifier(call.args.first()?)
+}
+
+fn is_uuid_parse_call(call: &ExprCall) -> bool {
+    let Expr::Path(function) = call.func.as_ref() else {
+        return false;
     };
 
     let segments: Vec<_> = function.path.segments.iter().collect();
 
     if segments.len() < 2 {
-        return None;
+        return false;
     }
 
     let owner = &segments[segments.len() - 2].ident;
     let method = &segments[segments.len() - 1].ident;
 
-    if owner != "Uuid" || method != "parse_str" {
-        return None;
-    }
-
-    expression_identifier(call.args.first()?)
+    owner == "Uuid" && method == "parse_str"
 }
 
 fn persistence_sink_spec(call: &ExprCall) -> Option<(&'static str, Vec<(&'static str, usize)>)> {

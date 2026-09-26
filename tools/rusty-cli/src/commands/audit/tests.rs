@@ -636,6 +636,119 @@ fn validated_application_input_does_not_protect_raw_sink_argument() {
 }
 
 #[test]
+fn recognizes_uuid_parse_in_application_use_case() {
+    let findings = scan_project(&[
+        (
+            "src/application/contacts/update.rs",
+            r#"
+            struct UpdateContactCommand {
+                id: String,
+            }
+
+            impl UpdateContactCommand {
+                fn new(id: String) -> Self {
+                    Self { id }
+                }
+            }
+
+            async fn update_contact(
+                pool: &PgPool,
+                command: UpdateContactCommand,
+            ) {
+                let id = match Uuid::parse_str(&command.id) {
+                    Ok(id) => id,
+                    Err(_) => return,
+                };
+
+                let _ = Contact::delete(pool, id).await;
+            }
+            "#,
+        ),
+        (
+            "src/web/procedures/contacts/update.rs",
+            r#"
+            use crate::application::contacts::update_contact as update_contact_use_case;
+
+            #[procedure]
+            async fn update_contact(
+                pool: &PgPool,
+                id: String,
+            ) {
+                let command = UpdateContactCommand::new(id);
+                update_contact_use_case(pool, command).await;
+            }
+            "#,
+        ),
+    ]);
+
+    assert!(findings.iter().any(|finding| {
+        finding.rule_id == PUBLIC_INPUT_AUDITED
+            && finding.detail.contains("id: String -> UUID parser")
+    }));
+
+    assert!(findings.iter().any(|finding| {
+        finding.rule_id == PERSISTENCE_FLOW_AUDITED
+            && finding.severity == Severity::Info
+            && finding.detail.contains("UUID parser")
+    }));
+
+    assert!(!findings.iter().any(|finding| {
+        finding.rule_id == PUBLIC_INPUT_UNRECOGNIZED
+            || finding.rule_id == PERSISTENCE_FLOW_UNRECOGNIZED
+    }));
+}
+
+#[test]
+fn raw_application_id_without_uuid_parse_fails_closed() {
+    let findings = scan_project(&[
+        (
+            "src/application/contacts/update.rs",
+            r#"
+            struct UpdateContactCommand {
+                id: String,
+            }
+
+            impl UpdateContactCommand {
+                fn new(id: String) -> Self {
+                    Self { id }
+                }
+            }
+
+            async fn update_contact(
+                pool: &PgPool,
+                command: UpdateContactCommand,
+            ) {
+                let _ = Contact::delete(pool, command.id).await;
+            }
+            "#,
+        ),
+        (
+            "src/web/procedures/contacts/update.rs",
+            r#"
+            use crate::application::contacts::update_contact as update_contact_use_case;
+
+            #[procedure]
+            async fn update_contact(
+                pool: &PgPool,
+                id: String,
+            ) {
+                let command = UpdateContactCommand::new(id);
+                update_contact_use_case(pool, command).await;
+            }
+            "#,
+        ),
+    ]);
+
+    assert!(findings.iter().any(|finding| {
+        finding.rule_id == PUBLIC_INPUT_UNRECOGNIZED && finding.severity == Severity::Warning
+    }));
+
+    assert!(findings.iter().any(|finding| {
+        finding.rule_id == PERSISTENCE_FLOW_UNRECOGNIZED && finding.severity == Severity::Warning
+    }));
+}
+
+#[test]
 fn ambiguous_application_function_fails_closed() {
     let findings = scan_project(&[
         (
