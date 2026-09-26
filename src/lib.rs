@@ -1,4 +1,5 @@
 mod app;
+mod application;
 pub(crate) mod auth;
 mod config;
 mod db;

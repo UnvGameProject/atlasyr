@@ -5,30 +5,31 @@ use topcoat::{
     runtime::procedure,
 };
 
-use crate::{
-    db::models::contact::Contact,
-    domain::contact::{ContactError, CreateContactInput},
+use crate::application::contacts::{
+    ContactValidation, CreateContactCommand, CreateContactOutcome,
+    create_contact as create_contact_use_case,
 };
-
-use super::validation::validation_outcome;
 
 #[procedure]
 pub(in crate::web) async fn create_contact(cx: &Cx, name: String, email: String) -> Result<String> {
-    let input = CreateContactInput::from_untrusted(name, email);
-
-    let input = match input.validate() {
-        Ok(input) => input,
-        Err(report) => {
-            return Ok(validation_outcome(&report).to_owned());
-        }
-    };
-
     let pool = app_context::<PgPool>(cx);
+    let command = CreateContactCommand::new(name, email);
 
-    match Contact::create(pool, &input).await {
-        Ok(_) => Ok("created".to_owned()),
+    match create_contact_use_case(pool, command).await {
+        Ok(CreateContactOutcome::Created) => Ok("created".to_owned()),
 
-        Err(ContactError::EmailAlreadyExists) => Ok("duplicate".to_owned()),
+        Ok(CreateContactOutcome::EmailAlreadyExists) => Ok("duplicate".to_owned()),
+
+        Ok(CreateContactOutcome::Validation(validation)) => {
+            let outcome = match validation {
+                ContactValidation::Name => "validation_name",
+                ContactValidation::Email => "validation_email",
+                ContactValidation::NameAndEmail => "validation_both",
+                ContactValidation::General => "validation",
+            };
+
+            Ok(outcome.to_owned())
+        }
 
         Err(error) => {
             eprintln!("contact creation failed: {error:?}");
