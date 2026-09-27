@@ -6,4 +6,7 @@ pub(in crate::web) const HOME_INDEX: ViewName = ViewName::trusted("pages/home/in
 
 pub(in crate::web) const VIEW_DX_DEMO: ViewName = ViewName::trusted("fragments/view_dx/demo.html");
 
-pub(super) const REGISTERED_VIEWS: &[ViewName] = &[APP_LAYOUT, HOME_INDEX, VIEW_DX_DEMO];
+pub(in crate::web) const CONTACTS_INDEX: ViewName = ViewName::trusted("pages/contacts/index.html");
+
+pub(super) const REGISTERED_VIEWS: &[ViewName] =
+    &[APP_LAYOUT, HOME_INDEX, VIEW_DX_DEMO, CONTACTS_INDEX];
