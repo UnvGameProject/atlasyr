@@ -7,7 +7,7 @@ use topcoat::{
     asset::asset_config,
     context::{Cx, app_context},
     htmx::hx_request,
-    router::{content::Form, page},
+    router::{content::Form, error::see_other, page},
     runtime::signal,
     view::View,
 };
@@ -72,6 +72,7 @@ async fn contacts_list_html(cx: &Cx) -> Result<impl View> {
     require_auth(cx).await?;
 
     let pool = app_context::<PgPool>(cx);
+
     let model = controllers::contacts::list(pool).await?;
 
     let renderer = app_context::<ViewRenderer>(cx);
@@ -106,15 +107,21 @@ async fn contacts_create_html(cx: &Cx, Form(input): Form<ContactCreateForm>) -> 
 
     let pool = app_context::<PgPool>(cx);
 
-    let workspace = controllers::contacts::create(pool, input.name, input.email).await?;
+    let result = controllers::contacts::create(pool, input.name, input.email).await?;
 
     let renderer = app_context::<ViewRenderer>(cx);
 
     if hx_request(cx) {
-        let rendered = renderer.render(CONTACTS_WORKSPACE, &workspace)?;
+        let rendered = renderer.render(CONTACTS_WORKSPACE, result.workspace())?;
 
         return Ok(rendered.into_view(cx));
     }
+
+    if result.succeeded() {
+        return Err(see_other("/contacts").into());
+    }
+
+    let workspace = result.into_workspace();
 
     let assets = asset_config(cx);
 
@@ -137,17 +144,23 @@ async fn contacts_update_html(cx: &Cx, Form(input): Form<ContactUpdateForm>) -> 
 
     let pool = app_context::<PgPool>(cx);
 
-    let row = controllers::contacts::update(pool, input.id, input.name, input.email).await?;
+    let result = controllers::contacts::update(pool, input.id, input.name, input.email).await?;
 
     let renderer = app_context::<ViewRenderer>(cx);
 
     if hx_request(cx) {
-        let model = ContactRowFragmentView::new(row);
+        let model = ContactRowFragmentView::new(result.into_row());
 
         let rendered = renderer.render(CONTACTS_ROW, &model)?;
 
         return Ok(rendered.into_view(cx));
     }
+
+    if result.succeeded() {
+        return Err(see_other("/contacts").into());
+    }
+
+    let row = result.into_row();
 
     let workspace = controllers::contacts::workspace_with_row(pool, row).await?;
 
@@ -190,15 +203,15 @@ async fn contacts_delete_html(cx: &Cx, Form(input): Form<ContactDeleteForm>) -> 
         return Ok(rendered.into_view(cx));
     }
 
-    let workspace = match result {
+    let row = match result {
         controllers::contacts::ContactDeleteResult::Deleted => {
-            controllers::contacts::workspace_default(pool).await?
+            return Err(see_other("/contacts").into());
         }
 
-        controllers::contacts::ContactDeleteResult::Row(row) => {
-            controllers::contacts::workspace_with_row(pool, row).await?
-        }
+        controllers::contacts::ContactDeleteResult::Row(row) => row,
     };
+
+    let workspace = controllers::contacts::workspace_with_row(pool, row).await?;
 
     let assets = asset_config(cx);
 

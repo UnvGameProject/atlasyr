@@ -41,6 +41,46 @@ pub(in crate::web) enum ContactDeleteResult {
     Row(ContactRowView),
 }
 
+pub(in crate::web) enum ContactCreateResult {
+    Created(ContactsWorkspaceView),
+    Render(ContactsWorkspaceView),
+}
+
+impl ContactCreateResult {
+    pub(in crate::web) fn succeeded(&self) -> bool {
+        matches!(self, Self::Created(_))
+    }
+
+    pub(in crate::web) fn workspace(&self) -> &ContactsWorkspaceView {
+        match self {
+            Self::Created(workspace) | Self::Render(workspace) => workspace,
+        }
+    }
+
+    pub(in crate::web) fn into_workspace(self) -> ContactsWorkspaceView {
+        match self {
+            Self::Created(workspace) | Self::Render(workspace) => workspace,
+        }
+    }
+}
+
+pub(in crate::web) enum ContactUpdateResult {
+    Updated(ContactRowView),
+    Render(ContactRowView),
+}
+
+impl ContactUpdateResult {
+    pub(in crate::web) fn succeeded(&self) -> bool {
+        matches!(self, Self::Updated(_))
+    }
+
+    pub(in crate::web) fn into_row(self) -> ContactRowView {
+        match self {
+            Self::Updated(row) | Self::Render(row) => row,
+        }
+    }
+}
+
 pub(in crate::web) async fn index(
     pool: &PgPool,
     app_css_url: String,
@@ -89,28 +129,41 @@ pub(in crate::web) async fn create(
     pool: &PgPool,
     name: String,
     email: String,
-) -> Result<ContactsWorkspaceView, ContactError> {
+) -> Result<ContactCreateResult, ContactError> {
     let command = CreateContactCommand::new(name.clone(), email.clone());
 
-    let form = match create_contact_use_case(pool, command).await {
-        Ok(outcome) => create_form_for_outcome(name, email, outcome),
+    let (form, succeeded) = match create_contact_use_case(pool, command).await {
+        Ok(outcome) => {
+            let succeeded = matches!(&outcome, CreateContactOutcome::Created);
+
+            (create_form_for_outcome(name, email, outcome), succeeded)
+        }
 
         Err(error) => {
             eprintln!("contact creation failed: {error:?}");
 
-            ContactCreateFormView::new(
-                name,
-                email,
-                None,
-                None,
-                Some(CREATE_ERROR_MESSAGE),
-                None,
-                None,
+            (
+                ContactCreateFormView::new(
+                    name,
+                    email,
+                    None,
+                    None,
+                    Some(CREATE_ERROR_MESSAGE),
+                    None,
+                    None,
+                ),
+                false,
             )
         }
     };
 
-    workspace(pool, form).await
+    let workspace = workspace(pool, form).await?;
+
+    Ok(if succeeded {
+        ContactCreateResult::Created(workspace)
+    } else {
+        ContactCreateResult::Render(workspace)
+    })
 }
 
 pub(in crate::web) async fn update(
@@ -118,7 +171,7 @@ pub(in crate::web) async fn update(
     id: String,
     name: String,
     email: String,
-) -> Result<ContactRowView, ContactError> {
+) -> Result<ContactUpdateResult, ContactError> {
     let command = UpdateContactCommand::new(id.clone(), name.clone(), email.clone());
 
     let outcome = match update_contact_use_case(pool, command).await {
@@ -129,11 +182,15 @@ pub(in crate::web) async fn update(
 
             let current = current_contact_row(pool, &id).await?;
 
-            return Ok(current
+            let row = current
                 .map(|row| row.editing(name, email, None, Some(UPDATE_ERROR_MESSAGE), None, None))
-                .unwrap_or_else(|| ContactRowView::unavailable(id, NOT_FOUND_MESSAGE)));
+                .unwrap_or_else(|| ContactRowView::unavailable(id, NOT_FOUND_MESSAGE));
+
+            return Ok(ContactUpdateResult::Render(row));
         }
     };
+
+    let succeeded = matches!(&outcome, UpdateContactOutcome::Updated { .. });
 
     let current = match outcome {
         UpdateContactOutcome::NotFound => None,
@@ -141,7 +198,13 @@ pub(in crate::web) async fn update(
         _ => current_contact_row(pool, &id).await?,
     };
 
-    Ok(update_row_for_outcome(current, id, name, email, outcome))
+    let row = update_row_for_outcome(current, id, name, email, outcome);
+
+    Ok(if succeeded {
+        ContactUpdateResult::Updated(row)
+    } else {
+        ContactUpdateResult::Render(row)
+    })
 }
 
 pub(in crate::web) async fn delete(
@@ -183,12 +246,6 @@ pub(in crate::web) async fn workspace_with_row(
         ContactCreateFormView::empty(),
         contacts,
     ))
-}
-
-pub(in crate::web) async fn workspace_default(
-    pool: &PgPool,
-) -> Result<ContactsWorkspaceView, ContactError> {
-    workspace(pool, ContactCreateFormView::empty()).await
 }
 
 async fn workspace(
