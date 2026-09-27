@@ -8,7 +8,7 @@ use topcoat::{
 
 use crate::{auth::current_identity, web::procedures::auth::login};
 
-#[page("/login")]
+#[page("/(native)/login")]
 async fn login_page(cx: &Cx) -> Result<impl View> {
     if current_identity(cx).await?.is_some() {
         return Err(redirect("/contacts").into());

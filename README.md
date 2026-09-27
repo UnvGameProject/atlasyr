@@ -429,33 +429,31 @@ Rusty now includes a project-local security/audit pass for important Rust input 
 
 The current checkpoint audits validated domain input, UUID parsing, credential verification, and persistence sink flows. At `auth-cleanup-final-v1`, the audit is clean with no warnings or errors.
 
-### View/DX feasibility — Green; architecture design next
+### View/DX Architecture v1 — Runtime foundation green
 
-The recent View/DX investigation established that Topcoat does not require ordinary page markup to remain compiled into Rust.
+View/DX Architecture v1 is adopted, and its first real application slice is green.
 
-Disposable experiments outside the repository verified:
+Verified in the repository:
 
-- MiniJinja 2.24.0 and Tera 2.4.0 can render external HTML views at runtime
-- layouts, includes, loops, and typed Rust data work with both engines
-- HTML values are escaped by default
-- ordinary HTML/view edits appear without recompiling Rust
-- malformed view syntax becomes an HTTP 500 instead of a Rust compiler failure
-- fixing only the view immediately restores HTTP 200
-- rendered external HTML can pass through a real Topcoat 0.9 page while preserving escaping
-- Topcoat's official htmx integration can perform server-owned POST mutations and return HTML fragments
-- the native Topcoat comparison page renders its procedure/signal browser wiring correctly alongside the HTML-first path
-- Topcoat native browser wiring and HTML-first interaction can coexist in the same application
+- MiniJinja 2.24.0 is the v1 runtime renderer for ordinary external HTML views
+- a project-owned `ViewRenderer` centralizes template rendering
+- application-owned `ViewName` values prevent request-controlled template paths
+- presentation data crosses the renderer through typed serializable view models
+- `RenderedHtml` owns the single application-controlled bridge to Topcoat `Unescaped`
+- MiniJinja HTML autoescaping remains enabled for ordinary model values
+- strict undefined-value behavior fails closed instead of silently rendering missing data
+- `|safe` is not used by application templates
+- development template reload uses MiniJinja autoreload support rather than rebuilding the Rust application for ordinary HTML edits
+- the public home page is rendered from `resources/views/pages/home/index.html`
+- the external home page uses `resources/views/layouts/app.html`
+- a real runtime HTML edit was observed on a subsequent request and restored without a Rust rebuild
+- the existing native Topcoat login and Contacts pages remain available under logical route groups without changing their public URLs
+- unauthenticated HTTP behavior remains `/` = 200, `/login` = 200, `/contacts` = 401
+- native Topcoat remains available for interactions where its typed reactive model provides meaningful value
 
-Current direction:
+The public home page was intentionally migrated first so the renderer foundation could be proven without disturbing Contacts, authentication mutations, or other security-sensitive application functionality.
 
-- HTML-first views should be the default for ordinary page/presentation work
-- native Topcoat reactivity should remain available where its stronger typed/reactive model provides real value
-- JavaScript, SCSS, CSS, and HTML should remain cleanly separated and first-class
-- MiniJinja is the preferred runtime-view candidate for the next design phase because of its development diagnostics, but it is not yet locked in
-- htmx is a proven HTML-first interaction option, not a mandatory application-wide dependency
-- Rusty should scaffold project conventions rather than become a custom view engine or Livewire replacement
-
-The next step is a concrete **View/DX Architecture v1** before the real Contacts UI is migrated to the new approach.
+The next View/DX slice is production/development loader hardening, startup template validation, renderer error behavior, and cooperation with the Topcoat development loop. htmx integration, Contacts migration, Rusty view scaffolding, and frontend-source reorganization remain separate later slices.
 
 ## Current stack
 
@@ -473,6 +471,8 @@ The next step is a concrete **View/DX Architecture v1** before the real Contacts
 
 Committed/current:
 
+- MiniJinja 2.24.0 runtime external HTML views
+- MiniJinja autoreload support for development-time template edits
 - Topcoat `view!`
 - Topcoat reactive runtime
 - Bootstrap 5.3.8
@@ -482,13 +482,11 @@ Committed/current:
 
 Evaluated successfully in disposable View/DX spikes:
 
-- runtime external HTML views
-- MiniJinja 2.24.0
 - Tera 2.4.0
 - Topcoat's official htmx integration
 - mixed HTML-first and native Topcoat interaction models
 
-MiniJinja and htmx are not yet committed as production application dependencies. They are inputs to the upcoming View/DX Architecture v1 decision.
+MiniJinja is the View/DX Architecture v1 renderer. htmx remains a proven interaction option but is not yet committed as an application dependency.
 
 Tailwind is supported by Topcoat but is intentionally **not required** by this template.
 
@@ -580,7 +578,7 @@ Topcoat and the application architecture must not become dependent on Tailwind.
 
 ## View and frontend DX direction
 
-The project is moving toward an **HTML-first, not HTML-only** presentation model.
+The project uses an **HTML-first, not HTML-only** presentation model for ordinary presentation work, introduced incrementally so existing native Topcoat functionality can remain in place while each boundary is proven.
 
 The intended separation is:
 
@@ -603,7 +601,7 @@ resources/
 │   ├── layouts/
 │   ├── pages/
 │   ├── partials/
-│   └── components/
+│   └── fragments/
 │
 ├── js/
 ├── scss/
@@ -611,9 +609,9 @@ resources/
 └── images/
 ```
 
-The exact names and boundaries will be finalized in View/DX Architecture v1.
+View/DX Architecture v1 reserves external HTML terminology such as views, layouts, partials, fragments, controllers, and view models for the HTML-first path. Topcoat-specific terms such as components, procedures, shards, and signals remain reserved for native Topcoat capabilities.
 
-The normal page flow should trend toward:
+The normal HTML-first page flow is:
 
 ```text
 Topcoat route
@@ -649,13 +647,13 @@ strongly typed reactive behavior where the extra machinery is justified
 
 This is deliberately not an instruction to replace Topcoat with htmx. Native Topcoat remains valuable for interactions that benefit from its typed server/browser coordination, procedures, signals, shards, or other framework-specific capabilities.
 
-### Runtime view candidate
+### Runtime view renderer
 
-MiniJinja is currently the preferred runtime-view candidate for the next design phase.
+MiniJinja 2.24.0 is the View/DX Architecture v1 runtime renderer.
 
-The preference is based on the completed spike, especially its source-oriented development diagnostics and successful runtime-loading behavior. Tera also passed the technical feasibility tests and remains a viable alternative if later requirements expose a MiniJinja weakness.
+The decision is based on the completed renderer investigation and the first real application slice: external HTML renders through Topcoat, ordinary HTML edits can be observed without a Rust rebuild, typed Rust view models remain on the server side, HTML values are escaped by default, and renderer failures remain ordinary application errors rather than Rust compiler failures.
 
-No runtime view engine has been committed to the production application yet.
+The application accesses MiniJinja through the narrow project-owned `ViewRenderer` boundary rather than spreading renderer-specific APIs throughout web code. Tera also passed the earlier feasibility experiments and remains useful comparison evidence, but it is not the v1 renderer.
 
 ### View security boundary
 
@@ -787,7 +785,7 @@ Future Rusty work should only be added where it materially improves project cons
 
 The next planned areas are:
 
-- View/DX scaffolding after View/DX Architecture v1 is finalized
+- View/DX scaffolding after the renderer and interaction conventions are proven through real application slices
 - PostgreSQL-backed model generation/synchronization using real database metadata
 - additional consistency/diagnostic commands only where they provide clear value
 

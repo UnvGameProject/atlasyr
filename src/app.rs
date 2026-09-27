@@ -12,6 +12,7 @@ use crate::{
     auth::AuthManager,
     config::{AuthConfig, DatabaseConfig},
     db,
+    web::ViewRenderer,
 };
 
 pub(crate) async fn run() -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -25,6 +26,8 @@ pub(crate) async fn run() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let auth = AuthManager::from_config(&auth_config);
 
+    let views = ViewRenderer::new();
+
     // The selected auth driver owns the complete session-security profile.
     // There is no independent runtime switch that can weaken these settings.
     let session_config = auth.session_config();
@@ -36,6 +39,7 @@ pub(crate) async fn run() -> Result<(), Box<dyn Error + Send + Sync>> {
         .discover()
         .app_context(database)
         .app_context(auth)
+        .app_context(views)
         .assets(AssetBundle::load().expect("Topcoat asset bundle was not found"))
         .build();
 

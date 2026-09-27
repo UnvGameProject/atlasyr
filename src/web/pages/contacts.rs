@@ -4,7 +4,7 @@ use topcoat::{Result, context::Cx, router::page, runtime::signal, view::View};
 
 use crate::web::views::contacts::{ContactsIndexViewModel, contacts_index};
 
-#[page("/contacts")]
+#[page("/(native)/contacts")]
 async fn contacts(cx: &Cx) -> Result<impl View> {
     require_auth(cx).await?;
 

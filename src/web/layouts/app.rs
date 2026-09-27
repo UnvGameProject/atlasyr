@@ -16,7 +16,7 @@ use crate::{
     },
 };
 
-#[layout("/")]
+#[layout("/(native)")]
 async fn app_layout(cx: &Cx, slot: Slot<'_>) -> Result<impl View> {
     let pool = app_context::<PgPool>(cx);
 
