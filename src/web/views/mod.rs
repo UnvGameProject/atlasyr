@@ -1,5 +1,3 @@
-pub(in crate::web) mod contacts;
-
 mod name;
 mod registry;
 mod rendered;

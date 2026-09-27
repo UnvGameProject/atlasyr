@@ -8,7 +8,6 @@ use topcoat::{
     context::{Cx, app_context},
     htmx::hx_request,
     router::{content::Form, error::see_other, page},
-    runtime::signal,
     view::View,
 };
 
@@ -17,10 +16,7 @@ use crate::web::{
     assets::{APP_CSS, BOOTSTRAP_JS, HTMX_JS, PLAIN_CSS},
     controllers,
     view_models::{ContactDeletedView, ContactRowFragmentView},
-    views::{
-        CONTACTS_DELETED, CONTACTS_INDEX, CONTACTS_LIST, CONTACTS_ROW, CONTACTS_WORKSPACE,
-        contacts::{ContactsIndexViewModel, contacts_index},
-    },
+    views::{CONTACTS_DELETED, CONTACTS_INDEX, CONTACTS_LIST, CONTACTS_ROW, CONTACTS_WORKSPACE},
 };
 
 topcoat::router::path_param!(contact_id);
@@ -49,22 +45,6 @@ struct ContactDeleteForm {
     // persistence failure. DeleteContactCommand remains ID-only.
     name: String,
     email: String,
-}
-
-#[page("/(native)/native/contacts")]
-async fn contacts(cx: &Cx) -> Result<impl View> {
-    require_auth(cx).await?;
-
-    let view_model = ContactsIndexViewModel {
-        name: signal(cx, String::new),
-        email: signal(cx, String::new),
-        status: signal(cx, String::new),
-        name_error: signal(cx, String::new),
-        email_error: signal(cx, String::new),
-        refresh: signal(cx, || 0.0),
-    };
-
-    contacts_index(cx, view_model).await
 }
 
 #[page("/contacts/list")]
