@@ -19,6 +19,9 @@ pub(in crate::web) const CONTACTS_LIST: ViewName =
 
 pub(in crate::web) const CONTACTS_ROW: ViewName = ViewName::trusted("fragments/contacts/row.html");
 
+pub(in crate::web) const CONTACTS_DELETED: ViewName =
+    ViewName::trusted("fragments/contacts/deleted.html");
+
 pub(super) const REGISTERED_VIEWS: &[ViewName] = &[
     APP_LAYOUT,
     HOME_INDEX,
@@ -28,4 +31,5 @@ pub(super) const REGISTERED_VIEWS: &[ViewName] = &[
     CONTACTS_WORKSPACE,
     CONTACTS_LIST,
     CONTACTS_ROW,
+    CONTACTS_DELETED,
 ];

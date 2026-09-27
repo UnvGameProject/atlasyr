@@ -16,9 +16,9 @@ use crate::web::{
     ViewRenderer,
     assets::{APP_CSS, BOOTSTRAP_JS, HTMX_JS, PLAIN_CSS},
     controllers,
-    view_models::ContactRowFragmentView,
+    view_models::{ContactDeletedView, ContactRowFragmentView},
     views::{
-        CONTACTS_INDEX, CONTACTS_LIST, CONTACTS_ROW, CONTACTS_WORKSPACE,
+        CONTACTS_DELETED, CONTACTS_INDEX, CONTACTS_LIST, CONTACTS_ROW, CONTACTS_WORKSPACE,
         contacts::{ContactsIndexViewModel, contacts_index},
     },
 };
@@ -36,6 +36,17 @@ struct ContactCreateForm {
 #[serde(deny_unknown_fields)]
 struct ContactUpdateForm {
     id: String,
+    name: String,
+    email: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ContactDeleteForm {
+    id: String,
+
+    // Presentation-only snapshots used only to render a generic
+    // persistence failure. DeleteContactCommand remains ID-only.
     name: String,
     email: String,
 }
@@ -61,7 +72,6 @@ async fn contacts_list_html(cx: &Cx) -> Result<impl View> {
     require_auth(cx).await?;
 
     let pool = app_context::<PgPool>(cx);
-
     let model = controllers::contacts::list(pool).await?;
 
     let renderer = app_context::<ViewRenderer>(cx);
@@ -140,6 +150,55 @@ async fn contacts_update_html(cx: &Cx, Form(input): Form<ContactUpdateForm>) -> 
     }
 
     let workspace = controllers::contacts::workspace_with_row(pool, row).await?;
+
+    let assets = asset_config(cx);
+
+    let model = controllers::contacts::index_with_workspace(
+        assets.resolve(APP_CSS),
+        assets.resolve(PLAIN_CSS),
+        assets.resolve(BOOTSTRAP_JS),
+        assets.resolve(HTMX_JS),
+        workspace,
+    );
+
+    let rendered = renderer.render(CONTACTS_INDEX, &model)?;
+
+    Ok(rendered.into_view(cx))
+}
+
+#[page(POST "/view-dx/contacts/delete")]
+async fn contacts_delete_html(cx: &Cx, Form(input): Form<ContactDeleteForm>) -> Result<impl View> {
+    require_auth(cx).await?;
+
+    let pool = app_context::<PgPool>(cx);
+
+    let result = controllers::contacts::delete(pool, input.id, input.name, input.email).await?;
+
+    let renderer = app_context::<ViewRenderer>(cx);
+
+    if hx_request(cx) {
+        let rendered = match result {
+            controllers::contacts::ContactDeleteResult::Deleted => {
+                renderer.render(CONTACTS_DELETED, &ContactDeletedView::new())?
+            }
+
+            controllers::contacts::ContactDeleteResult::Row(row) => {
+                renderer.render(CONTACTS_ROW, &ContactRowFragmentView::new(row))?
+            }
+        };
+
+        return Ok(rendered.into_view(cx));
+    }
+
+    let workspace = match result {
+        controllers::contacts::ContactDeleteResult::Deleted => {
+            controllers::contacts::workspace_default(pool).await?
+        }
+
+        controllers::contacts::ContactDeleteResult::Row(row) => {
+            controllers::contacts::workspace_with_row(pool, row).await?
+        }
+    };
 
     let assets = asset_config(cx);
 

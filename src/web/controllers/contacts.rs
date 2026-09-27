@@ -4,7 +4,8 @@ use uuid::Uuid;
 use crate::{
     application::contacts::{
         ContactListItem, ContactValidation, CreateContactCommand, CreateContactOutcome,
-        UpdateContactCommand, UpdateContactOutcome, create_contact as create_contact_use_case,
+        DeleteContactCommand, DeleteContactOutcome, UpdateContactCommand, UpdateContactOutcome,
+        create_contact as create_contact_use_case, delete_contact as delete_contact_use_case,
         find_contact, list_contacts, update_contact as update_contact_use_case,
     },
     domain::contact::ContactError,
@@ -31,6 +32,14 @@ const NAME_ERROR: &str = "Name is required and must be 200 characters or fewer."
 const EMAIL_ERROR: &str = "Enter a valid email address no longer than 320 characters.";
 
 const DUPLICATE_EMAIL_ERROR: &str = "A contact with this email address already exists.";
+
+const DELETE_ERROR_MESSAGE: &str = "The contact could not be deleted.";
+
+#[derive(Debug, PartialEq, Eq)]
+pub(in crate::web) enum ContactDeleteResult {
+    Deleted,
+    Row(ContactRowView),
+}
 
 pub(in crate::web) async fn index(
     pool: &PgPool,
@@ -135,6 +144,27 @@ pub(in crate::web) async fn update(
     Ok(update_row_for_outcome(current, id, name, email, outcome))
 }
 
+pub(in crate::web) async fn delete(
+    pool: &PgPool,
+    id: String,
+    name: String,
+    email: String,
+) -> Result<ContactDeleteResult, ContactError> {
+    let command = DeleteContactCommand::new(id.clone());
+
+    match delete_contact_use_case(pool, command).await {
+        Ok(outcome) => Ok(delete_result_for_outcome(id, outcome)),
+
+        Err(error) => {
+            eprintln!("contact deletion failed: {error:?}");
+
+            Ok(ContactDeleteResult::Row(
+                ContactRowView::display(id, name, email).delete_failed(DELETE_ERROR_MESSAGE),
+            ))
+        }
+    }
+}
+
 pub(in crate::web) async fn workspace_with_row(
     pool: &PgPool,
     row: ContactRowView,
@@ -153,6 +183,12 @@ pub(in crate::web) async fn workspace_with_row(
         ContactCreateFormView::empty(),
         contacts,
     ))
+}
+
+pub(in crate::web) async fn workspace_default(
+    pool: &PgPool,
+) -> Result<ContactsWorkspaceView, ContactError> {
+    workspace(pool, ContactCreateFormView::empty()).await
 }
 
 async fn workspace(
@@ -183,6 +219,16 @@ async fn contact_rows(pool: &PgPool) -> Result<Vec<ContactRowView>, ContactError
 
 fn contact_row(contact: ContactListItem) -> ContactRowView {
     ContactRowView::display(contact.id.to_string(), contact.name, contact.email)
+}
+
+fn delete_result_for_outcome(id: String, outcome: DeleteContactOutcome) -> ContactDeleteResult {
+    match outcome {
+        DeleteContactOutcome::Deleted => ContactDeleteResult::Deleted,
+
+        DeleteContactOutcome::NotFound => {
+            ContactDeleteResult::Row(ContactRowView::unavailable(id, NOT_FOUND_MESSAGE))
+        }
+    }
 }
 
 fn update_row_for_outcome(
@@ -330,13 +376,16 @@ fn create_form_for_outcome(
 #[cfg(test)]
 mod tests {
     use crate::{
-        application::contacts::{ContactValidation, CreateContactOutcome, UpdateContactOutcome},
+        application::contacts::{
+            ContactValidation, CreateContactOutcome, DeleteContactOutcome, UpdateContactOutcome,
+        },
         web::view_models::{ContactCreateFormView, ContactRowView},
     };
 
     use super::{
-        CREATED_MESSAGE, DUPLICATE_EMAIL_ERROR, EMAIL_ERROR, NAME_ERROR, NOT_FOUND_MESSAGE,
-        UPDATED_MESSAGE, VALIDATION_MESSAGE, create_form_for_outcome, update_row_for_outcome,
+        CREATED_MESSAGE, ContactDeleteResult, DUPLICATE_EMAIL_ERROR, EMAIL_ERROR, NAME_ERROR,
+        NOT_FOUND_MESSAGE, UPDATED_MESSAGE, VALIDATION_MESSAGE, create_form_for_outcome,
+        delete_result_for_outcome, update_row_for_outcome,
     };
 
     #[test]
@@ -511,5 +560,25 @@ mod tests {
         let expected = ContactRowView::unavailable(id, NOT_FOUND_MESSAGE);
 
         assert_eq!(actual, expected);
+    }
+    #[test]
+    fn deleted_outcome_requests_row_removal() {
+        let actual = delete_result_for_outcome(
+            "00000000-0000-0000-0000-000000000001".to_owned(),
+            DeleteContactOutcome::Deleted,
+        );
+
+        assert_eq!(actual, ContactDeleteResult::Deleted,);
+    }
+
+    #[test]
+    fn not_found_delete_returns_unavailable_row() {
+        let id = "00000000-0000-0000-0000-000000000001".to_owned();
+
+        let actual = delete_result_for_outcome(id.clone(), DeleteContactOutcome::NotFound);
+
+        let expected = ContactDeleteResult::Row(ContactRowView::unavailable(id, NOT_FOUND_MESSAGE));
+
+        assert_eq!(actual, expected,);
     }
 }

@@ -97,9 +97,11 @@ pub(in crate::web) struct ContactRowView {
     edit_name: String,
     edit_email: String,
     edit_open: bool,
+    delete_open: bool,
     success_message: Option<&'static str>,
     validation_message: Option<&'static str>,
     error_message: Option<&'static str>,
+    delete_error_message: Option<&'static str>,
     name_error: Option<&'static str>,
     email_error: Option<&'static str>,
     unavailable_message: Option<&'static str>,
@@ -114,9 +116,11 @@ impl ContactRowView {
             name,
             email,
             edit_open: false,
+            delete_open: false,
             success_message: None,
             validation_message: None,
             error_message: None,
+            delete_error_message: None,
             name_error: None,
             email_error: None,
             unavailable_message: None,
@@ -135,9 +139,11 @@ impl ContactRowView {
         self.edit_name = edit_name;
         self.edit_email = edit_email;
         self.edit_open = true;
+        self.delete_open = false;
         self.success_message = None;
         self.validation_message = validation_message;
         self.error_message = error_message;
+        self.delete_error_message = None;
         self.name_error = name_error;
         self.email_error = email_error;
         self.unavailable_message = None;
@@ -149,9 +155,25 @@ impl ContactRowView {
         self.edit_name = self.name.clone();
         self.edit_email = self.email.clone();
         self.edit_open = false;
+        self.delete_open = false;
         self.success_message = Some(message);
         self.validation_message = None;
         self.error_message = None;
+        self.delete_error_message = None;
+        self.name_error = None;
+        self.email_error = None;
+        self.unavailable_message = None;
+
+        self
+    }
+
+    pub(in crate::web) fn delete_failed(mut self, message: &'static str) -> Self {
+        self.edit_open = false;
+        self.delete_open = true;
+        self.success_message = None;
+        self.validation_message = None;
+        self.error_message = None;
+        self.delete_error_message = Some(message);
         self.name_error = None;
         self.email_error = None;
         self.unavailable_message = None;
@@ -167,9 +189,11 @@ impl ContactRowView {
             edit_name: String::new(),
             edit_email: String::new(),
             edit_open: false,
+            delete_open: false,
             success_message: None,
             validation_message: None,
             error_message: None,
+            delete_error_message: None,
             name_error: None,
             email_error: None,
             unavailable_message: Some(message),
@@ -189,5 +213,14 @@ pub(in crate::web) struct ContactRowFragmentView {
 impl ContactRowFragmentView {
     pub(in crate::web) fn new(row: ContactRowView) -> Self {
         Self { row }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub(in crate::web) struct ContactDeletedView {}
+
+impl ContactDeletedView {
+    pub(in crate::web) fn new() -> Self {
+        Self {}
     }
 }
