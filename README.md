@@ -337,18 +337,18 @@ Verified:
 - Rust 1.98.1 development toolchain
 - Topcoat 0.9.0
 - Dockerized development environment
-- Direct Topcoat HTTP serving on localhost
-- Server-side rendering
+- direct Topcoat HTTP serving on localhost
+- server-side rendering
 - Topcoat layouts and routing
 - Topcoat browser runtime
 - Rust-authored client reactivity
 - Topcoat asset bundling
-- Plain CSS
+- plain CSS
 - SCSS
 - Bootstrap 5.3.8
-- Locally built and self-hosted Bootstrap JavaScript
+- locally built and self-hosted Bootstrap JavaScript
 - Node isolated to the asset-builder container
-- Host and container Cargo build directories isolated from each other
+- host and container Cargo build directories isolated from each other
 - `cargo check --locked` succeeds both on the host and in Docker
 
 The application is available at:
@@ -357,11 +357,13 @@ The application is available at:
 http://localhost:3000
 ```
 
-The host mapping intentionally binds to `127.0.0.1` so the development application is not exposed to the LAN by default.
+The host mapping intentionally binds to `127.0.0.1`, so the development application is not exposed to the LAN by default.
 
-### POC 1 — In progress
+### POC 1 — Green application/data baseline
 
-Currently verified:
+The application/data foundation and first end-to-end Contacts feature slice are working.
+
+Verified:
 
 - PostgreSQL 18.6 container
 - Docker Compose file-backed secrets
@@ -372,26 +374,88 @@ Currently verified:
 - SQLx native reversible migrations
 - migration hash stability through LF-pinned SQL files
 - SQLx offline metadata under `.sqlx/`
-- compile-time Contact row-shape contract
-- explicit compile-time Contact nullability contract
-- Contact persistence methods for `find_by_id`, `find_all`, and `count`
-- isolated database-backed Contact persistence tests
-- four passing Contact persistence tests
+- compile-time Contact row-shape and nullability contracts
+- Contact create/read/update/delete persistence
+- application-layer Contact create/update/delete boundaries
+- dedicated Contact list query/read-model boundary
+- typed validation and UUID parsing before persistence
+- isolated database-backed persistence tests
 - separate warm `postgres-test` service
 - fail-closed database test safety gate
 - test-only ephemeral PostgreSQL storage
 - project-wide `./test` entrypoint
-- approximately 1.3-second verified warm full-suite test run
-- Rusty CLI standalone crate
-- Rusty Docker service
-- location-independent repository-root `rusty` wrapper
-- optional global Bash `rusty` alias
-- reversible migration scaffolding
-- module-aware `make:test` scaffolding
-- `make:command` command scaffolding
+- Rusty CLI standalone crate and Docker service
+- reversible migration, module-aware test, and command scaffolding
 - generated project files owned by the host developer rather than root
 
-The first complete Contact create/update/delete workflow and validation boundary are the next application-facing pieces.
+### POC 2 — Green validation/forms baseline
+
+The first application-facing validation and mutation workflow is complete enough for the POC baseline.
+
+Verified:
+
+- typed Contact create/update inputs
+- field-specific normalization
+- validation before application/persistence work
+- UUID parsing at the application boundary
+- create/update/delete procedures routed through the application layer
+- safe browser-facing failure states rather than persistence errors leaking directly to the client
+- Contact page presentation split into pages, views, components, shards, and procedures
+
+### POC 3 — Green authentication/session baseline
+
+Authentication is complete for the current POC scope.
+
+Verified:
+
+- startup-selected authentication provider configuration
+- `local-topcoat` provider with no request-selectable driver and no fallback/downgrade path
+- Argon2id password hashing and verification
+- generic invalid-credential responses
+- unknown-user password verification work to reduce credential-enumeration timing differences
+- login throttling before expensive password verification
+- persisted server-side sessions using Topcoat session infrastructure
+- login, logout, authenticated navigation, and protected-route enforcement
+- session persistence across refreshes
+- session lifetime profile with idle, absolute, and refresh windows
+- operator-created users through the project CLI flow without placing passwords in argv or environment variables
+- automated authentication/session lifecycle coverage
+
+Public self-registration, password reset, email verification, and MFA are not part of the completed baseline and remain separate future capabilities.
+
+### Rusty security audit — Green baseline
+
+Rusty now includes a project-local security/audit pass for important Rust input and persistence boundaries.
+
+The current checkpoint audits validated domain input, UUID parsing, credential verification, and persistence sink flows. At `auth-cleanup-final-v1`, the audit is clean with no warnings or errors.
+
+### View/DX feasibility — Green; architecture design next
+
+The recent View/DX investigation established that Topcoat does not require ordinary page markup to remain compiled into Rust.
+
+Disposable experiments outside the repository verified:
+
+- MiniJinja 2.24.0 and Tera 2.4.0 can render external HTML views at runtime
+- layouts, includes, loops, and typed Rust data work with both engines
+- HTML values are escaped by default
+- ordinary HTML/view edits appear without recompiling Rust
+- malformed view syntax becomes an HTTP 500 instead of a Rust compiler failure
+- fixing only the view immediately restores HTTP 200
+- rendered external HTML can pass through a real Topcoat 0.9 page while preserving escaping
+- Topcoat's official htmx integration can perform server-owned POST mutations and return HTML fragments
+- the native Topcoat comparison page renders its procedure/signal browser wiring correctly alongside the HTML-first path
+- Topcoat native browser wiring and HTML-first interaction can coexist in the same application
+
+Current direction:
+
+- HTML-first views should be the default for ordinary page/presentation work
+- native Topcoat reactivity should remain available where its stronger typed/reactive model provides real value
+- JavaScript, SCSS, CSS, and HTML should remain cleanly separated and first-class
+- MiniJinja is the preferred runtime-view candidate for the next design phase because of its development diagnostics, but it is not yet locked in
+- htmx is a proven HTML-first interaction option, not a mandatory application-wide dependency
+- Rusty should scaffold project conventions rather than become a custom view engine or Livewire replacement
+
+The next step is a concrete **View/DX Architecture v1** before the real Contacts UI is migrated to the new approach.
 
 ## Current stack
 
@@ -401,34 +465,50 @@ The first complete Contact create/update/delete workflow and validation boundary
 - Rust edition 2024
 - Topcoat 0.9.0
 - Tokio
+- SQLx 0.9.0
+- PostgreSQL 18.6
+- application-owned authentication with Topcoat-backed sessions
 
 ### Frontend
+
+Committed/current:
 
 - Topcoat `view!`
 - Topcoat reactive runtime
 - Bootstrap 5.3.8
 - Dart Sass
-- Plain CSS
+- plain CSS
+- ordinary JavaScript through the frontend asset pipeline
+
+Evaluated successfully in disposable View/DX spikes:
+
+- runtime external HTML views
+- MiniJinja 2.24.0
+- Tera 2.4.0
+- Topcoat's official htmx integration
+- mixed HTML-first and native Topcoat interaction models
+
+MiniJinja and htmx are not yet committed as production application dependencies. They are inputs to the upcoming View/DX Architecture v1 decision.
 
 Tailwind is supported by Topcoat but is intentionally **not required** by this template.
 
-The frontend architecture must remain compatible with standards-based CSS and must not depend on any single CSS framework.
+The frontend architecture must remain compatible with standards-based HTML/CSS/JavaScript and must not depend on any single CSS or browser-interaction framework.
 
 ### Infrastructure
 
 - Docker Compose
 - Rust application container
-- Dedicated frontend asset-builder container
+- dedicated frontend asset-builder container
 - PostgreSQL 18.6 development database
-- Dedicated one-shot migration runner
+- dedicated one-shot migration runner
 - Dockerized Rusty CLI development-tool service
-- Isolated `postgres-test` PostgreSQL service under the Compose `test` profile
-- One-shot test runner container
-- Dedicated Cargo target volume for test builds
+- isolated `postgres-test` PostgreSQL service under the Compose `test` profile
+- one-shot test runner container
+- dedicated Cargo target volume for test builds
 - Docker Compose secrets
-- Separate PostgreSQL bootstrap, migration, runtime, and test credentials
+- separate PostgreSQL bootstrap, migration, runtime, and test credentials
 - `tmpfs` masking of repository `.secrets/` inside bind-mounted containers
-- Ephemeral `tmpfs` storage for the isolated test PostgreSQL cluster
+- ephemeral `tmpfs` storage for the isolated test PostgreSQL cluster
 
 ## Rust toolchain
 
@@ -482,7 +562,7 @@ This prevents container-created root-owned build artifacts from interfering with
 
 ## Frontend asset policy
 
-Plain CSS, SCSS, Bootstrap, and other appropriate standards-based frontend technologies are first-class options.
+Plain CSS, SCSS, Bootstrap, ordinary JavaScript, and other appropriate standards-based frontend technologies are first-class options.
 
 Current behavior:
 
@@ -497,6 +577,119 @@ Current behavior:
 - Generated frontend output is not committed.
 
 Topcoat and the application architecture must not become dependent on Tailwind.
+
+## View and frontend DX direction
+
+The project is moving toward an **HTML-first, not HTML-only** presentation model.
+
+The intended separation is:
+
+```text
+src/
+├── web/
+│   ├── routes/
+│   ├── controllers/
+│   ├── view_models/
+│   ├── procedures/
+│   ├── components/       # native Topcoat where justified
+│   └── shards/           # native Topcoat where justified
+│
+├── application/
+├── domain/
+└── db/
+
+resources/
+├── views/
+│   ├── layouts/
+│   ├── pages/
+│   ├── partials/
+│   └── components/
+│
+├── js/
+├── scss/
+├── css/
+└── images/
+```
+
+The exact names and boundaries will be finalized in View/DX Architecture v1.
+
+The normal page flow should trend toward:
+
+```text
+Topcoat route
+    ↓
+Rust controller
+    ↓
+application/query logic
+    ↓
+typed view model
+    ↓
+runtime HTML view
+    ↓
+Topcoat HTTP response
+```
+
+Ordinary page markup, styling, and browser behavior should not require a Rust developer or a Rust rebuild merely because HTML, CSS, SCSS, or JavaScript changed.
+
+### Progressive interaction model
+
+The project should use the least complicated mechanism that fits the interaction:
+
+```text
+ordinary HTML/CSS
+    ↓
+Bootstrap or ordinary JavaScript
+    ↓
+HTML-first server interaction such as htmx
+    ↓
+native Topcoat component/shard/procedure
+    ↓
+strongly typed reactive behavior where the extra machinery is justified
+```
+
+This is deliberately not an instruction to replace Topcoat with htmx. Native Topcoat remains valuable for interactions that benefit from its typed server/browser coordination, procedures, signals, shards, or other framework-specific capabilities.
+
+### Runtime view candidate
+
+MiniJinja is currently the preferred runtime-view candidate for the next design phase.
+
+The preference is based on the completed spike, especially its source-oriented development diagnostics and successful runtime-loading behavior. Tera also passed the technical feasibility tests and remains a viable alternative if later requirements expose a MiniJinja weakness.
+
+No runtime view engine has been committed to the production application yet.
+
+### View security boundary
+
+Runtime views must preserve the same security posture as the compiled Topcoat view path.
+
+Required invariants:
+
+- untrusted values are escaped by default
+- raw HTML is never trusted merely because it came through a view model
+- the runtime renderer owns the narrow trusted boundary used to pass fully rendered HTML into Topcoat
+- arbitrary request-controlled view paths are forbidden
+- view lookup must prevent path traversal and arbitrary file access
+- development reload behavior must not weaken production view integrity
+- browser action identifiers and values remain untrusted input
+- authorization, validation, and business rules remain server-authoritative
+- production should validate/preload/package views rather than depend on an unrestricted mutable runtime filesystem unless explicitly justified
+
+### Rusty responsibility
+
+Rusty should automate project conventions, not invent another frontend framework.
+
+Likely future View/DX scaffolding includes commands equivalent to:
+
+```text
+rusty make:controller Dashboard
+rusty make:view dashboard/index
+rusty make:page Dashboard --path /dashboard
+rusty make:component ...
+rusty make:resource ...
+```
+
+Exact command names are not yet committed.
+
+Rusty may create route/controller/view registrations and validation checks, but it should not become a custom HTML parser, template language, browser-reactivity VM, or Livewire clone.
 
 ## Rusty CLI developer tooling
 
@@ -516,10 +709,12 @@ The containerized executable is accessed through the location-independent reposi
 
 When the optional Bash alias is installed, commands can be invoked simply as `rusty ...` from any directory.
 
-Current commands:
+Current commands include:
 
 ```text
 rusty doctor
+rusty audit
+
 rusty migration <Name>
 rusty make:migration <Name>
 rusty migration <Name> --simple
@@ -549,6 +744,7 @@ Current responsibilities include:
 - deterministic scaffolding of new Rusty CLI commands
 - dry-run command-generation previews
 - deterministic generator markers for Rusty's command enum, module registry, and dispatcher
+- project-local Rust security/audit rules for public input, validation/UUID parsing, credential verification, dynamic SQL, shell execution, and persistence sink flows
 
 The default reversible migration convention is:
 
@@ -589,9 +785,13 @@ and updates module registration as needed.
 
 Future Rusty work should only be added where it materially improves project consistency or development velocity.
 
-The next major planned area is PostgreSQL-backed model generation/synchronization using real database metadata. That generator should target the canonical module structure, use actual primary-key metadata, map known PostgreSQL types explicitly, and fail rather than silently guessing unknown database types.
+The next planned areas are:
 
-Additional diagnostics or documentation helpers may be added later if they provide clear value.
+- View/DX scaffolding after View/DX Architecture v1 is finalized
+- PostgreSQL-backed model generation/synchronization using real database metadata
+- additional consistency/diagnostic commands only where they provide clear value
+
+Database-backed model generation should target the canonical module structure, use actual primary-key metadata, map known PostgreSQL types explicitly, and fail rather than silently guessing unknown database types.
 
 The legacy PHP Rusty CLI is not part of this template.
 
@@ -699,6 +899,37 @@ Security controls are evaluated independently, including:
 
 Missing Topcoat functionality must be implemented using mature, well-reviewed Rust crates or proven industry patterns rather than ad-hoc replacements.
 
+## Authentication and session baseline
+
+The current authentication architecture deliberately separates application credential policy from the underlying Topcoat session transport.
+
+Current invariants:
+
+- authentication provider selection happens at startup
+- the provider is not selectable from request input
+- unsupported providers fail closed
+- there is no fallback/downgrade path
+- the current provider is `local-topcoat`
+- application code owns credential verification and security policy
+- Topcoat provides the server-side session infrastructure
+- Argon2id is used for password hashing
+- login throttling occurs before expensive password verification
+- unknown-user requests still perform password-verification work
+- invalid credentials return generic browser-facing failures
+- persisted server-side session state is authoritative
+- protected endpoints authenticate independently
+- logout revokes access
+- session/backend failures are not intentionally collapsed into false unauthenticated responses
+- passwords are opaque inputs and are not generically trimmed or normalized
+- email lookup is normalized separately from password handling
+- passwords, raw session tokens, and token hashes must not be logged
+
+The current local session profile uses bounded idle and absolute lifetimes plus a refresh window. Session rotation remains an explicit security seam rather than being simulated with custom application tokens.
+
+The application also provides an operator user-creation flow that reads the password interactively instead of accepting it through command-line arguments or environment variables.
+
+Public self-registration, password reset, email verification, and MFA remain future account-lifecycle capabilities rather than requirements for the completed POC authentication baseline.
+
 ## User-input trust model
 
 All client input is untrusted.
@@ -800,15 +1031,7 @@ The Compose migration service runs under `topcoat_migrator` and completes before
 
 The first migration creates `public.contacts` with UUID primary keys, bounded non-empty names, bounded email storage, timestamps, and a case-insensitive unique index on `lower(email)`. UUID values are generated in Rust rather than by the database.
 
-The current Contact persistence API includes:
-
-```text
-Contact::find_by_id(...)
-Contact::find_all(...)
-Contact::count(...)
-```
-
-Create/update/delete behavior will be added only after the typed input and validation boundary is defined.
+The current Contact persistence API includes create, read, update, delete, and list/count operations. Production web mutations route through the application layer rather than invoking persistence directly, and list rendering consumes an application query/read model rather than a persistence row structure.
 
 ## Migration build tracking
 
@@ -906,27 +1129,33 @@ Custom reflection or procedural macros should only be introduced if SQLx does no
 
 Incoming request structures and persisted database structures are separate concepts.
 
-For example:
+The established Contact mutation flow is:
 
 ```text
-CreateContactInput
+untrusted browser/procedure input
+        ↓
+typed create/update command
         ↓
 field-specific normalization
         ↓
 validation
         ↓
-validated input
+validated domain input
+        ↓
+application boundary
         ↓
 authorization / business rules
         ↓
-Contact::create(...)
+Contact persistence
         ↓
-Contact
+Contact / application result
 ```
 
-The application should not deserialize arbitrary HTTP input directly into persisted database models.
+The application does not deserialize arbitrary HTTP input directly into persisted database models.
 
 This provides a strongly typed boundary against accidental privilege fields, mass-assignment-style mistakes, and unvalidated data reaching persistence code.
+
+Contact create, update, and delete operations now route through the application layer. Contact listing is also isolated behind an application query/read-model boundary so web presentation code does not consume persistence structures directly.
 
 Passwords or similarly opaque secrets must not be subjected to generic trimming or normalization. Normalization is field-specific.
 
@@ -1056,6 +1285,7 @@ Rusty CLI usage:
 ```bash
 rusty --help
 rusty doctor
+rusty audit
 rusty migration CreateContacts
 rusty make:test db/models/contact validation
 rusty make:command model:sync --dry-run
@@ -1065,13 +1295,24 @@ The repository-root `./rusty` wrapper remains usable even when the global Bash a
 
 ## Topcoat development reload
 
-`topcoat::dev::script()` is currently retained because it provides Topcoat's browser-side automatic development reload/status behavior.
+Topcoat 0.9's development loop has been inspected directly as part of the View/DX work.
+
+Verified behavior:
+
+- the previous successful application can keep serving while a rebuild is pending
+- a failed rebuild does not require the previous working application to be torn down
+- the dev broadcast process survives application restarts
+- the browser protocol distinguishes rebuilding, build failure, application exit, reload, and already-up-to-date states
+- successful reloads can refresh the current document through Topcoat's browser-side morph/update behavior rather than relying only on a blind full-page reload
+- Topcoat watches local workspace sources broadly enough that future runtime view directories may also trigger its watcher, even when Cargo ultimately has no Rust binary change to rebuild
+
+`topcoat::dev::script()` is currently retained because it provides Topcoat's browser-side development reload/status behavior.
 
 Under the current Docker configuration, its dynamically selected development endpoint is not exposed correctly to the host browser and can produce a refused `dev.js` request.
 
-This does not affect application functionality.
+This does not affect application functionality. The development endpoint should be corrected separately rather than removing the feature.
 
-The development endpoint will be corrected separately rather than removing the feature.
+The upcoming View/DX architecture should cooperate with Topcoat's development loop rather than reimplement its private CLI reload protocol.
 
 ## Repository policy
 
@@ -1121,9 +1362,9 @@ Do not commit:
 
 ### POC 1 — Application/data foundation
 
-**Status: In progress**
+**Status: Green baseline**
 
-Green:
+Implemented:
 
 - modular application structure
 - PostgreSQL
@@ -1136,25 +1377,19 @@ Green:
 - Rusty CLI migration scaffolding
 - embedded/versioned migrations
 - LF-stable migration hashing
-- first `contacts` migration
+- `contacts` migration
 - Contact persisted row model
 - SQLx offline metadata
 - compile-time row-shape contract
 - compile-time nullability contract
-- first Contact read persistence methods
+- Contact create/read/update/delete persistence
 - isolated PostgreSQL test environment
 - fail-closed test database safety gate
 - per-test SQLx databases
-- module-local Contact persistence tests
+- module-local persistence tests
 - fast warm test feedback loop
-
-Next:
-
-- typed Contact create/update inputs
-- field-specific normalization
-- validation
-- Contact create/update/delete persistence
-- first complete CRUD workflow
+- application-layer Contact mutations
+- application Contact list query/read-model boundary
 
 ### Developer tooling — Rusty CLI
 
@@ -1169,6 +1404,7 @@ Implemented:
 - host UID/GID-safe generated files
 - optional global Bash alias
 - `doctor`
+- `audit`
 - reversible SQLx migration generator
 - simple/irreversible migration option
 - migration compatibility alias
@@ -1178,42 +1414,86 @@ Implemented:
 - `make:command`
 - deterministic Rusty command-registration markers
 - command scaffold `--dry-run`
+- public-input/persistence/security audit rules
 
 Planned:
 
+- View/DX scaffolding after the architecture is finalized
 - PostgreSQL-backed model generation and synchronization
 - additional consistency/diagnostic commands only where they provide clear value
 
 ### POC 2 — Validation and forms
 
-Planned:
+**Status: Green baseline**
 
-- typed request models
-- normalization
+Implemented:
+
+- typed Contact request/command inputs
+- field-specific normalization
 - validation
-- safe error rendering
-- form-state handling
-- invalid-input testing
+- UUID parsing
+- application mutation boundary
+- browser-facing mutation states
+- create/update/delete Contact workflow
+
+Future work can extend these patterns to additional resource types rather than re-proving the same baseline.
 
 ### POC 3 — Authentication and sessions
 
-Planned comparison against mature Laravel/Fortify-style expectations:
+**Status: Green baseline for current POC scope**
 
-- registration
+Implemented:
+
+- startup-selected authentication provider
+- no request-controlled provider switching
+- no fallback/downgrade path
+- Argon2id password hashing and verification
+- generic invalid-login behavior
+- login throttling
+- unknown-user verification work
+- persisted Topcoat-backed sessions
 - login
 - logout
-- secure password hashing
-- session rotation
-- expiration
-- login throttling
+- protected routes
+- authenticated navigation
+- session persistence
+- bounded idle/absolute/refresh session profile
+- operator user creation
+- authentication/session lifecycle tests
+
+Future account-lifecycle capabilities:
+
+- public registration, if required by an application
 - password reset
 - email verification
 - MFA
-- credential enumeration resistance
+
+### Cross-cutting — View/DX architecture
+
+**Status: Feasibility proven; v1 design in progress**
+
+Verified experimentally:
+
+- runtime external HTML views can coexist with Topcoat 0.9
+- HTML/view edits do not inherently require Rust recompilation
+- runtime view syntax failures can remain HTTP/runtime failures rather than compiler failures
+- MiniJinja and Tera both satisfy the basic runtime-view requirement
+- MiniJinja currently has the stronger development-DX signal
+- Topcoat's official htmx integration works for server-owned POST updates
+- native Topcoat procedure/signal wiring and HTML-first interactions can coexist
+
+Current design direction:
+
+- HTML-first default for ordinary presentation
+- separate JS/SCSS/CSS resources
+- native Topcoat reactivity as an opt-in capability
+- Rust controllers/application logic feeding typed view models
+- Rusty scaffolding conventions instead of a custom view/reactivity framework
+- explicit dev/prod view-loading and security policy
 
 ### POC 4 — Authorization
 
-Planned:
+**Status: Planned**
 
 - policies
 - RBAC
@@ -1223,27 +1503,40 @@ Planned:
 
 ### POC 5 — Web security hardening
 
-Planned:
+**Status: Partially implemented; broader hardening planned**
 
-- CSRF/origin protections
+Already represented in the current baseline:
+
+- authentication throttling
+- secure server-side session handling
+- generic credential failures
+- least-privilege database roles
+- typed/validated application input
+- default output escaping
+- Rusty security auditing
+
+Still to evaluate or complete as application-wide policy:
+
+- CSRF/origin protections for all relevant mutation paths
 - CSP
 - security headers
-- rate limiting
 - request-size limits
-- secure cookies
-- error handling
-- audit logging
+- file-upload policy
+- broader rate-limiting policy
+- production error handling
+- application audit logging
 
 ### POC 6 — Production readiness
 
-Planned:
+**Status: Planned**
 
-- tests
+- complete test matrix
 - dependency auditing
 - container hardening
 - observability
 - deployment strategy
 - production reverse proxy/TLS architecture
+- production runtime-view validation/preload/package policy
 
 ## Decision criteria
 
@@ -1258,5 +1551,8 @@ Topcoat/Rust must demonstrate that it can provide:
 - strong testing ergonomics
 - manageable dependency risk
 - clean deployment and operations
+- ordinary HTML/CSS/JavaScript work that does not unnecessarily require Rust recompilation
+- a progressive path from standard web development to native Topcoat reactivity
+- clear separation between routes/controllers, application logic, views, JavaScript, and styles
 
-If recreating Laravel's mature safeguards creates excessive custom security or maintenance burden, that will weigh against a rewrite even if the Rust implementation performs well.
+If recreating Laravel's mature safeguards or developer ergonomics creates excessive custom security or maintenance burden, that will weigh against a rewrite even if the Rust implementation performs well.
