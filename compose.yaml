@@ -81,6 +81,7 @@ services:
       assets:
         condition: service_healthy
     environment:
+      APP_ENV: development
       HOST: 0.0.0.0
       PORT: 3000
       RUST_BACKTRACE: 1

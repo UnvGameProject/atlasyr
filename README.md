@@ -453,7 +453,15 @@ Verified in the repository:
 
 The public home page was intentionally migrated first so the renderer foundation could be proven without disturbing Contacts, authentication mutations, or other security-sensitive application functionality.
 
-The next View/DX slice is production/development loader hardening, startup template validation, renderer error behavior, and cooperation with the Topcoat development loop. htmx integration, Contacts migration, Rusty view scaffolding, and frontend-source reorganization remain separate later slices.
+The runtime-mode hardening slice is also green. Renderer behavior is now selected explicitly through `APP_ENV` rather than Rust compilation profile:
+
+- `development` uses MiniJinja autoreload and rich server-side diagnostics
+- `testing` uses a deterministic cached renderer with startup validation
+- `production` uses a cached renderer, validates registered views before the HTTP server starts, disables MiniJinja rich debug mode, and restricts renderer logging to production-safe structured diagnostics
+- renderer failures return Topcoat's generic HTTP 500 response rather than exposing template source, filesystem paths, or internal model details
+- registered application views are validated through the project-owned view registry
+
+The next View/DX slice is the first real HTML-first interaction using htmx. Contacts migration, Rusty view scaffolding, and frontend-source reorganization remain separate later slices.
 
 ## Current stack
 
@@ -666,10 +674,10 @@ Required invariants:
 - the runtime renderer owns the narrow trusted boundary used to pass fully rendered HTML into Topcoat
 - arbitrary request-controlled view paths are forbidden
 - view lookup must prevent path traversal and arbitrary file access
-- development reload behavior must not weaken production view integrity
+- development reload behavior must not weaken production view integrity; only the explicit `development` environment enables filesystem autoreload
 - browser action identifiers and values remain untrusted input
 - authorization, validation, and business rules remain server-authoritative
-- production should validate/preload/package views rather than depend on an unrestricted mutable runtime filesystem unless explicitly justified
+- production uses a fixed application-owned view root, disables rich template debug formatting, and validates registered views at startup; deployment packaging/read-only filesystem policy remains an operational concern
 
 ### Rusty responsibility
 
@@ -1310,7 +1318,7 @@ Under the current Docker configuration, its dynamically selected development end
 
 This does not affect application functionality. The development endpoint should be corrected separately rather than removing the feature.
 
-The upcoming View/DX architecture should cooperate with Topcoat's development loop rather than reimplement its private CLI reload protocol.
+The HTML-first view system and Topcoat development loop remain deliberately separate: MiniJinja autoreload handles ordinary HTML view edits, while Topcoat's development machinery remains responsible for Rust rebuild/reload behavior. The project does not reimplement Topcoat's private CLI reload protocol.
 
 ## Repository policy
 

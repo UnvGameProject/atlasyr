@@ -10,12 +10,14 @@ use topcoat::{
 
 use crate::{
     auth::AuthManager,
-    config::{AuthConfig, DatabaseConfig},
+    config::{AppEnvironment, AuthConfig, DatabaseConfig},
     db,
     web::ViewRenderer,
 };
 
 pub(crate) async fn run() -> Result<(), Box<dyn Error + Send + Sync>> {
+    let app_environment = AppEnvironment::load()?;
+
     let database_config = DatabaseConfig::load()?;
 
     let auth_config = AuthConfig::load()?;
@@ -26,7 +28,7 @@ pub(crate) async fn run() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let auth = AuthManager::from_config(&auth_config);
 
-    let views = ViewRenderer::new();
+    let views = ViewRenderer::new(app_environment)?;
 
     // The selected auth driver owns the complete session-security profile.
     // There is no independent runtime switch that can weaken these settings.
