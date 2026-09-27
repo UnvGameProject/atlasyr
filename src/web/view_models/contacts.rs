@@ -27,6 +27,17 @@ impl ContactsIndexView {
     }
 }
 
+#[derive(Debug, Serialize)]
+pub(in crate::web) struct ContactsListView {
+    contacts: Vec<ContactRowView>,
+}
+
+impl ContactsListView {
+    pub(in crate::web) fn new(contacts: Vec<ContactRowView>) -> Self {
+        Self { contacts }
+    }
+}
+
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub(in crate::web) struct ContactRowView {
     id: String,

@@ -1,0 +1,40 @@
+{% if contacts %}
+    <div class="card shadow-sm">
+        <div class="table-responsive">
+            <table class="table table-striped align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th scope="col">
+                            Name
+                        </th>
+
+                        <th scope="col">
+                            Email
+                        </th>
+                    </tr>
+                </thead>
+
+                <tbody>
+                    {% for contact in contacts %}
+                        <tr id="contact-{{ contact.id }}">
+                            <td>
+                                {{ contact.name }}
+                            </td>
+
+                            <td>
+                                {{ contact.email }}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+{% else %}
+    <div
+        class="alert alert-secondary"
+        role="status"
+    >
+        No contacts have been created yet.
+    </div>
+{% endif %}

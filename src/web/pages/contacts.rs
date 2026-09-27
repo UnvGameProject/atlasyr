@@ -15,7 +15,7 @@ use crate::web::{
     assets::{APP_CSS, BOOTSTRAP_JS, HTMX_JS, PLAIN_CSS},
     controllers,
     views::{
-        CONTACTS_INDEX,
+        CONTACTS_INDEX, CONTACTS_LIST,
         contacts::{ContactsIndexViewModel, contacts_index},
     },
 };
@@ -34,6 +34,21 @@ async fn contacts(cx: &Cx) -> Result<impl View> {
     };
 
     contacts_index(cx, view_model).await
+}
+
+#[page("/view-dx/contacts/list")]
+async fn contacts_list_html(cx: &Cx) -> Result<impl View> {
+    require_auth(cx).await?;
+
+    let pool = app_context::<PgPool>(cx);
+
+    let model = controllers::contacts::list(pool).await?;
+
+    let renderer = app_context::<ViewRenderer>(cx);
+
+    let rendered = renderer.render(CONTACTS_LIST, &model)?;
+
+    Ok(rendered.into_view(cx))
 }
 
 #[page("/view-dx/contacts")]

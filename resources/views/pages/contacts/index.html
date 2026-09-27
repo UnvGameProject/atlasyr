@@ -35,45 +35,34 @@
         </a>
     </div>
 
-    {% if contacts %}
-        <div class="card shadow-sm">
-            <div class="table-responsive">
-                <table class="table table-striped align-middle mb-0">
-                    <thead>
-                        <tr>
-                            <th scope="col">
-                                Name
-                            </th>
-
-                            <th scope="col">
-                                Email
-                            </th>
-                        </tr>
-                    </thead>
-
-                    <tbody>
-                        {% for contact in contacts %}
-                            <tr id="contact-{{ contact.id }}">
-                                <td>
-                                    {{ contact.name }}
-                                </td>
-
-                                <td>
-                                    {{ contact.email }}
-                                </td>
-                            </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    {% else %}
+    <section aria-labelledby="contacts-list-heading">
         <div
-            class="alert alert-secondary"
-            role="status"
+            class="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-3"
         >
-            No contacts have been created yet.
+            <h2
+                class="h4 mb-0"
+                id="contacts-list-heading"
+            >
+                Existing contacts
+            </h2>
+
+            <button
+                type="button"
+                class="btn btn-outline-primary"
+                hx-get="/view-dx/contacts/list"
+                hx-target="#contacts-list"
+                hx-swap="innerHTML"
+            >
+                Refresh contacts
+            </button>
         </div>
-    {% endif %}
+
+        <div
+            id="contacts-list"
+            aria-live="polite"
+        >
+            {% include "fragments/contacts/list.html" %}
+        </div>
+    </section>
 </main>
 {% endblock %}

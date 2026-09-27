@@ -463,9 +463,9 @@ The runtime-mode hardening slice is also green. Renderer behavior is now selecte
 
 The first HTML-first htmx interaction is now green. The application pins and self-hosts htmx, exposes it through Topcoat's asset system, and serves a standalone MiniJinja fragment from `/view-dx/demo`. The route uses Topcoat's `hx_request` accessor only as request/presentation metadata; direct requests remain valid and `HX-Request` is not an authentication or authorization boundary.
 
-Contacts migration onto the HTML-first architecture is now underway. The first Contacts slice adds a parallel protected `/view-dx/contacts` read path backed by the existing `application::contacts::list_contacts` query, a typed presentation model, and an external MiniJinja page while preserving the native `/contacts` CRUD workflow unchanged.
+Contacts migration onto the HTML-first architecture now has a protected full-page read path plus a protected htmx list-fragment path. `/view-dx/contacts` renders through a typed MiniJinja page model, while `/view-dx/contacts/list` renders the same `fragments/contacts/list.html` fragment used by the full page. Both paths reuse the existing `application::contacts::list_contacts` query, and every externally callable Contacts read route independently enforces authentication. The native `/contacts` CRUD workflow remains unchanged.
 
-The next View/DX slice adds an HTML Contacts list fragment and htmx refresh path before any create/update/delete migration. Rusty view scaffolding and broader frontend-source reorganization remain separate later slices.
+The next View/DX slice migrates contact creation as the first HTML/htmx mutation while preserving the existing application validation, duplicate-email handling, authentication boundary, and native CRUD path until parity is proven. Rusty view scaffolding and broader frontend-source reorganization remain separate later slices.
 
 ## Current stack
 
