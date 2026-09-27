@@ -13,7 +13,7 @@
 
                     <a
                         class="alert-link ms-1"
-                        href="/view-dx/contacts"
+                        href="/contacts"
                     >
                         Refresh contacts
                     </a>
@@ -56,8 +56,8 @@
                         <form
                             class="row g-3 mt-1"
                             method="post"
-                            action="/view-dx/contacts/update"
-                            hx-post="/view-dx/contacts/update"
+                            action="/contacts/update"
+                            hx-post="/contacts/update"
                             hx-target="#contact-{{ row.id }}"
                             hx-swap="outerHTML"
                             novalidate
@@ -168,8 +168,8 @@
 
                                 <a
                                     class="btn btn-sm btn-outline-secondary"
-                                    href="/view-dx/contacts"
-                                    hx-get="/view-dx/contacts/{{ row.id }}/row"
+                                    href="/contacts"
+                                    hx-get="/contacts/{{ row.id }}/row"
                                     hx-target="#contact-{{ row.id }}"
                                     hx-swap="outerHTML"
                                 >
@@ -211,8 +211,8 @@
                             <form
                                 class="d-flex gap-2 mt-3"
                                 method="post"
-                                action="/view-dx/contacts/delete"
-                                hx-post="/view-dx/contacts/delete"
+                                action="/contacts/delete"
+                                hx-post="/contacts/delete"
                                 hx-target="#contact-{{ row.id }}"
                                 hx-swap="outerHTML"
                             >
@@ -243,8 +243,8 @@
 
                                 <a
                                     class="btn btn-sm btn-outline-secondary"
-                                    href="/view-dx/contacts"
-                                    hx-get="/view-dx/contacts/{{ row.id }}/row"
+                                    href="/contacts"
+                                    hx-get="/contacts/{{ row.id }}/row"
                                     hx-target="#contact-{{ row.id }}"
                                     hx-swap="outerHTML"
                                 >

@@ -51,7 +51,7 @@ struct ContactDeleteForm {
     email: String,
 }
 
-#[page("/(native)/contacts")]
+#[page("/(native)/native/contacts")]
 async fn contacts(cx: &Cx) -> Result<impl View> {
     require_auth(cx).await?;
 
@@ -67,7 +67,7 @@ async fn contacts(cx: &Cx) -> Result<impl View> {
     contacts_index(cx, view_model).await
 }
 
-#[page("/view-dx/contacts/list")]
+#[page("/contacts/list")]
 async fn contacts_list_html(cx: &Cx) -> Result<impl View> {
     require_auth(cx).await?;
 
@@ -81,7 +81,7 @@ async fn contacts_list_html(cx: &Cx) -> Result<impl View> {
     Ok(rendered.into_view(cx))
 }
 
-#[page("/view-dx/contacts/{contact_id}/row")]
+#[page("/contacts/{contact_id}/row")]
 async fn contacts_row_html(cx: &Cx) -> Result<impl View> {
     require_auth(cx).await?;
 
@@ -100,7 +100,7 @@ async fn contacts_row_html(cx: &Cx) -> Result<impl View> {
     Ok(rendered.into_view(cx))
 }
 
-#[page(POST "/view-dx/contacts/create")]
+#[page(POST "/contacts/create")]
 async fn contacts_create_html(cx: &Cx, Form(input): Form<ContactCreateForm>) -> Result<impl View> {
     require_auth(cx).await?;
 
@@ -131,7 +131,7 @@ async fn contacts_create_html(cx: &Cx, Form(input): Form<ContactCreateForm>) -> 
     Ok(rendered.into_view(cx))
 }
 
-#[page(POST "/view-dx/contacts/update")]
+#[page(POST "/contacts/update")]
 async fn contacts_update_html(cx: &Cx, Form(input): Form<ContactUpdateForm>) -> Result<impl View> {
     require_auth(cx).await?;
 
@@ -166,7 +166,7 @@ async fn contacts_update_html(cx: &Cx, Form(input): Form<ContactUpdateForm>) -> 
     Ok(rendered.into_view(cx))
 }
 
-#[page(POST "/view-dx/contacts/delete")]
+#[page(POST "/contacts/delete")]
 async fn contacts_delete_html(cx: &Cx, Form(input): Form<ContactDeleteForm>) -> Result<impl View> {
     require_auth(cx).await?;
 
@@ -215,7 +215,7 @@ async fn contacts_delete_html(cx: &Cx, Form(input): Form<ContactDeleteForm>) -> 
     Ok(rendered.into_view(cx))
 }
 
-#[page("/view-dx/contacts")]
+#[page("/contacts")]
 async fn contacts_html(cx: &Cx) -> Result<impl View> {
     require_auth(cx).await?;
 
