@@ -20,6 +20,16 @@ impl From<Contact> for ContactListItem {
     }
 }
 
+pub(crate) async fn find_contact(
+    pool: &PgPool,
+    id: Uuid,
+) -> Result<Option<ContactListItem>, ContactError> {
+    Contact::find_by_id(pool, id)
+        .await
+        .map(|contact| contact.map(ContactListItem::from))
+        .map_err(ContactError::storage)
+}
+
 pub(crate) async fn list_contacts(pool: &PgPool) -> Result<Vec<ContactListItem>, ContactError> {
     Contact::find_all(pool)
         .await

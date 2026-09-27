@@ -94,10 +94,100 @@ pub(in crate::web) struct ContactRowView {
     id: String,
     name: String,
     email: String,
+    edit_name: String,
+    edit_email: String,
+    edit_open: bool,
+    success_message: Option<&'static str>,
+    validation_message: Option<&'static str>,
+    error_message: Option<&'static str>,
+    name_error: Option<&'static str>,
+    email_error: Option<&'static str>,
+    unavailable_message: Option<&'static str>,
 }
 
 impl ContactRowView {
-    pub(in crate::web) fn new(id: String, name: String, email: String) -> Self {
-        Self { id, name, email }
+    pub(in crate::web) fn display(id: String, name: String, email: String) -> Self {
+        Self {
+            id,
+            edit_name: name.clone(),
+            edit_email: email.clone(),
+            name,
+            email,
+            edit_open: false,
+            success_message: None,
+            validation_message: None,
+            error_message: None,
+            name_error: None,
+            email_error: None,
+            unavailable_message: None,
+        }
+    }
+
+    pub(in crate::web) fn editing(
+        mut self,
+        edit_name: String,
+        edit_email: String,
+        validation_message: Option<&'static str>,
+        error_message: Option<&'static str>,
+        name_error: Option<&'static str>,
+        email_error: Option<&'static str>,
+    ) -> Self {
+        self.edit_name = edit_name;
+        self.edit_email = edit_email;
+        self.edit_open = true;
+        self.success_message = None;
+        self.validation_message = validation_message;
+        self.error_message = error_message;
+        self.name_error = name_error;
+        self.email_error = email_error;
+        self.unavailable_message = None;
+
+        self
+    }
+
+    pub(in crate::web) fn updated(mut self, message: &'static str) -> Self {
+        self.edit_name = self.name.clone();
+        self.edit_email = self.email.clone();
+        self.edit_open = false;
+        self.success_message = Some(message);
+        self.validation_message = None;
+        self.error_message = None;
+        self.name_error = None;
+        self.email_error = None;
+        self.unavailable_message = None;
+
+        self
+    }
+
+    pub(in crate::web) fn unavailable(id: String, message: &'static str) -> Self {
+        Self {
+            id,
+            name: String::new(),
+            email: String::new(),
+            edit_name: String::new(),
+            edit_email: String::new(),
+            edit_open: false,
+            success_message: None,
+            validation_message: None,
+            error_message: None,
+            name_error: None,
+            email_error: None,
+            unavailable_message: Some(message),
+        }
+    }
+
+    pub(in crate::web) fn id(&self) -> &str {
+        &self.id
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub(in crate::web) struct ContactRowFragmentView {
+    row: ContactRowView,
+}
+
+impl ContactRowFragmentView {
+    pub(in crate::web) fn new(row: ContactRowView) -> Self {
+        Self { row }
     }
 }

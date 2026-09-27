@@ -16,15 +16,26 @@ use crate::web::{
     ViewRenderer,
     assets::{APP_CSS, BOOTSTRAP_JS, HTMX_JS, PLAIN_CSS},
     controllers,
+    view_models::ContactRowFragmentView,
     views::{
-        CONTACTS_INDEX, CONTACTS_LIST, CONTACTS_WORKSPACE,
+        CONTACTS_INDEX, CONTACTS_LIST, CONTACTS_ROW, CONTACTS_WORKSPACE,
         contacts::{ContactsIndexViewModel, contacts_index},
     },
 };
 
+topcoat::router::path_param!(contact_id);
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ContactCreateForm {
+    name: String,
+    email: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ContactUpdateForm {
+    id: String,
     name: String,
     email: String,
 }
@@ -60,6 +71,25 @@ async fn contacts_list_html(cx: &Cx) -> Result<impl View> {
     Ok(rendered.into_view(cx))
 }
 
+#[page("/view-dx/contacts/{contact_id}/row")]
+async fn contacts_row_html(cx: &Cx) -> Result<impl View> {
+    require_auth(cx).await?;
+
+    let id: &str = topcoat::router::path_param::<ContactId>(cx);
+
+    let pool = app_context::<PgPool>(cx);
+
+    let row = controllers::contacts::row(pool, id).await?;
+
+    let renderer = app_context::<ViewRenderer>(cx);
+
+    let model = ContactRowFragmentView::new(row);
+
+    let rendered = renderer.render(CONTACTS_ROW, &model)?;
+
+    Ok(rendered.into_view(cx))
+}
+
 #[page(POST "/view-dx/contacts/create")]
 async fn contacts_create_html(cx: &Cx, Form(input): Form<ContactCreateForm>) -> Result<impl View> {
     require_auth(cx).await?;
@@ -75,6 +105,41 @@ async fn contacts_create_html(cx: &Cx, Form(input): Form<ContactCreateForm>) -> 
 
         return Ok(rendered.into_view(cx));
     }
+
+    let assets = asset_config(cx);
+
+    let model = controllers::contacts::index_with_workspace(
+        assets.resolve(APP_CSS),
+        assets.resolve(PLAIN_CSS),
+        assets.resolve(BOOTSTRAP_JS),
+        assets.resolve(HTMX_JS),
+        workspace,
+    );
+
+    let rendered = renderer.render(CONTACTS_INDEX, &model)?;
+
+    Ok(rendered.into_view(cx))
+}
+
+#[page(POST "/view-dx/contacts/update")]
+async fn contacts_update_html(cx: &Cx, Form(input): Form<ContactUpdateForm>) -> Result<impl View> {
+    require_auth(cx).await?;
+
+    let pool = app_context::<PgPool>(cx);
+
+    let row = controllers::contacts::update(pool, input.id, input.name, input.email).await?;
+
+    let renderer = app_context::<ViewRenderer>(cx);
+
+    if hx_request(cx) {
+        let model = ContactRowFragmentView::new(row);
+
+        let rendered = renderer.render(CONTACTS_ROW, &model)?;
+
+        return Ok(rendered.into_view(cx));
+    }
+
+    let workspace = controllers::contacts::workspace_with_row(pool, row).await?;
 
     let assets = asset_config(cx);
 

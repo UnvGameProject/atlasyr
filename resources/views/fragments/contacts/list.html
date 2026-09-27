@@ -11,22 +11,19 @@
                         <th scope="col">
                             Email
                         </th>
+
+                        <th
+                            class="text-end"
+                            scope="col"
+                        >
+                            Actions
+                        </th>
                     </tr>
                 </thead>
 
-                <tbody>
-                    {% for contact in contacts %}
-                        <tr id="contact-{{ contact.id }}">
-                            <td>
-                                {{ contact.name }}
-                            </td>
-
-                            <td>
-                                {{ contact.email }}
-                            </td>
-                        </tr>
-                    {% endfor %}
-                </tbody>
+                {% for row in contacts %}
+                    {% include "fragments/contacts/row.html" %}
+                {% endfor %}
             </table>
         </div>
     </div>
