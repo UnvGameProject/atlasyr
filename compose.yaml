@@ -61,7 +61,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "test -s /workspace/generated/app.css && test -s /workspace/generated/bootstrap.bundle.min.js"
+          "test -s /workspace/generated/app.css && test -s /workspace/generated/bootstrap.bundle.min.js && test -s /workspace/generated/htmx.min.js"
         ]
       interval: 1s
       timeout: 2s

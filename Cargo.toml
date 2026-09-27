@@ -6,7 +6,7 @@ rust-version = "1.98"
 default-run = "topcoat-poc"
 
 [dependencies]
-topcoat = { version = "=0.9.0", features = ["tower"] }
+topcoat = { version = "=0.9.0", features = ["tower", "htmx"] }
 tokio = { version = "1.51.1", features = ["rt-multi-thread", "macros"] }
 minijinja = "=2.24.0"
 minijinja-autoreload = "=2.21.0"

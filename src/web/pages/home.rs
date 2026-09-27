@@ -8,7 +8,7 @@ use topcoat::{
 
 use crate::web::{
     ViewRenderer,
-    assets::{APP_CSS, BOOTSTRAP_JS, PLAIN_CSS},
+    assets::{APP_CSS, BOOTSTRAP_JS, HTMX_JS, PLAIN_CSS},
     controllers,
     views::HOME_INDEX,
 };
@@ -21,6 +21,7 @@ async fn home(cx: &Cx) -> Result<impl View> {
         assets.resolve(APP_CSS),
         assets.resolve(PLAIN_CSS),
         assets.resolve(BOOTSTRAP_JS),
+        assets.resolve(HTMX_JS),
     );
 
     let renderer = app_context::<ViewRenderer>(cx);

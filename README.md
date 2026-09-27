@@ -461,7 +461,9 @@ The runtime-mode hardening slice is also green. Renderer behavior is now selecte
 - renderer failures return Topcoat's generic HTTP 500 response rather than exposing template source, filesystem paths, or internal model details
 - registered application views are validated through the project-owned view registry
 
-The next View/DX slice is the first real HTML-first interaction using htmx. Contacts migration, Rusty view scaffolding, and frontend-source reorganization remain separate later slices.
+The first HTML-first htmx interaction is now green. The application pins and self-hosts htmx, exposes it through Topcoat's asset system, and serves a standalone MiniJinja fragment from `/view-dx/demo`. The route uses Topcoat's `hx_request` accessor only as request/presentation metadata; direct requests remain valid and `HX-Request` is not an authentication or authorization boundary.
+
+The next View/DX slice is Contacts migration onto the HTML-first architecture. Rusty view scaffolding and broader frontend-source reorganization remain separate later slices.
 
 ## Current stack
 
@@ -494,7 +496,7 @@ Evaluated successfully in disposable View/DX spikes:
 - Topcoat's official htmx integration
 - mixed HTML-first and native Topcoat interaction models
 
-MiniJinja is the View/DX Architecture v1 renderer. htmx remains a proven interaction option but is not yet committed as an application dependency.
+MiniJinja is the View/DX Architecture v1 renderer. htmx 2.0.10 is now a pinned, locally served application dependency for HTML-first server interactions where partial DOM replacement is appropriate; native Topcoat remains available for interactions that benefit from its typed reactive model.
 
 Tailwind is supported by Topcoat but is intentionally **not required** by this template.
 

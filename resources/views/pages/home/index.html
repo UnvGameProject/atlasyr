@@ -32,6 +32,17 @@
                 <div class="d-flex flex-wrap gap-3 mt-4">
                     <button
                         type="button"
+                        class="btn btn-primary btn-lg"
+                        id="view-dx-demo-trigger"
+                        hx-get="/view-dx/demo"
+                        hx-target="#view-dx-demo"
+                        hx-swap="innerHTML"
+                    >
+                        Load htmx fragment
+                    </button>
+
+                    <button
+                        type="button"
                         class="btn btn-outline-light btn-lg"
                         data-bs-toggle="collapse"
                         data-bs-target="#bootstrap-check"
@@ -40,6 +51,16 @@
                     >
                         Toggle Bootstrap JS
                     </button>
+                </div>
+
+                <div
+                    id="view-dx-demo"
+                    class="mt-4"
+                    aria-live="polite"
+                >
+                    <div class="border rounded-3 p-3 text-secondary">
+                        htmx fragment has not been requested yet.
+                    </div>
                 </div>
 
                 <div class="collapse mt-3" id="bootstrap-check">
