@@ -56,3 +56,29 @@ fn audit_command_parses() {
 
     assert!(matches!(cli.command, CliCommand::Audit));
 }
+
+#[test]
+fn make_view_accepts_page_path() {
+    let cli = Cli::try_parse_from(["rusty", "make:view", "dashboard/index"])
+        .expect("make:view syntax should parse");
+
+    let CliCommand::MakeView(args) = cli.command else {
+        panic!("expected make:view command");
+    };
+
+    assert_eq!(args.path, "dashboard/index",);
+
+    assert!(!args.dry_run,);
+}
+
+#[test]
+fn make_view_accepts_dry_run() {
+    let cli = Cli::try_parse_from(["rusty", "make:view", "dashboard/index", "--dry-run"])
+        .expect("make:view --dry-run should parse");
+
+    let CliCommand::MakeView(args) = cli.command else {
+        panic!("expected make:view command");
+    };
+
+    assert!(args.dry_run,);
+}

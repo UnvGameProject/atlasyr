@@ -697,11 +697,12 @@ Required invariants:
 
 Rusty should automate project conventions, not invent another frontend framework.
 
+Rusty now provides `make:view` as the foundational View/DX scaffolding primitive. It creates an external HTML page template under `resources/views/pages`, registers an app-owned `ViewName`, adds that view to startup validation, refuses existing paths or symbols, and supports a no-write `--dry-run` preview. It does not infer routes, authentication, controller behavior, htmx behavior, or persistence wiring.
+
 Likely future View/DX scaffolding includes commands equivalent to:
 
 ```text
 rusty make:controller Dashboard
-rusty make:view dashboard/index
 rusty make:page Dashboard --path /dashboard
 rusty make:component ...
 rusty make:resource ...
@@ -744,6 +745,8 @@ rusty test <module-path> <test-name>
 
 rusty make:command <command-name>
 rusty make:command <command-name> --dry-run
+rusty make:view <page/path>
+rusty make:view <page/path> --dry-run
 ```
 
 Current responsibilities include:

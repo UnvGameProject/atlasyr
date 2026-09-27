@@ -22,6 +22,8 @@ pub(in crate::web) const CONTACTS_ROW: ViewName = ViewName::trusted("fragments/c
 pub(in crate::web) const CONTACTS_DELETED: ViewName =
     ViewName::trusted("fragments/contacts/deleted.html");
 
+// RUSTY_VIEW_CONSTANTS
+
 pub(super) const REGISTERED_VIEWS: &[ViewName] = &[
     APP_LAYOUT,
     HOME_INDEX,
@@ -32,4 +34,5 @@ pub(super) const REGISTERED_VIEWS: &[ViewName] = &[
     CONTACTS_LIST,
     CONTACTS_ROW,
     CONTACTS_DELETED,
+    // RUSTY_REGISTERED_VIEWS
 ];

@@ -33,6 +33,12 @@ pub(crate) enum CliCommand {
     )]
     MakeCommand(CommandArgs),
 
+    #[command(
+        name = "make:view",
+        about = "Scaffold and register an external HTML page view"
+    )]
+    MakeView(ViewArgs),
+
     #[command(name = "doctor", about = "Inspect the Rusty CLI project environment")]
     Doctor,
 
@@ -70,6 +76,16 @@ pub(crate) struct TestArgs {
     /// Example: rusty make:test --view web/pages/contacts
     #[arg(long, conflicts_with = "name")]
     pub(crate) view: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ViewArgs {
+    /// View path relative to resources/views/pages, e.g. dashboard/index.
+    pub(crate) path: String,
+
+    /// Show what would be generated without changing files.
+    #[arg(long)]
+    pub(crate) dry_run: bool,
 }
 
 #[derive(Debug, Args)]
