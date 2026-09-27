@@ -1,11 +1,13 @@
 use crate::auth::require_auth;
 
+use serde::Deserialize;
 use sqlx::PgPool;
 use topcoat::{
     Result,
     asset::asset_config,
     context::{Cx, app_context},
-    router::page,
+    htmx::hx_request,
+    router::{content::Form, page},
     runtime::signal,
     view::View,
 };
@@ -15,10 +17,17 @@ use crate::web::{
     assets::{APP_CSS, BOOTSTRAP_JS, HTMX_JS, PLAIN_CSS},
     controllers,
     views::{
-        CONTACTS_INDEX, CONTACTS_LIST,
+        CONTACTS_INDEX, CONTACTS_LIST, CONTACTS_WORKSPACE,
         contacts::{ContactsIndexViewModel, contacts_index},
     },
 };
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ContactCreateForm {
+    name: String,
+    email: String,
+}
 
 #[page("/(native)/contacts")]
 async fn contacts(cx: &Cx) -> Result<impl View> {
@@ -47,6 +56,37 @@ async fn contacts_list_html(cx: &Cx) -> Result<impl View> {
     let renderer = app_context::<ViewRenderer>(cx);
 
     let rendered = renderer.render(CONTACTS_LIST, &model)?;
+
+    Ok(rendered.into_view(cx))
+}
+
+#[page(POST "/view-dx/contacts/create")]
+async fn contacts_create_html(cx: &Cx, Form(input): Form<ContactCreateForm>) -> Result<impl View> {
+    require_auth(cx).await?;
+
+    let pool = app_context::<PgPool>(cx);
+
+    let workspace = controllers::contacts::create(pool, input.name, input.email).await?;
+
+    let renderer = app_context::<ViewRenderer>(cx);
+
+    if hx_request(cx) {
+        let rendered = renderer.render(CONTACTS_WORKSPACE, &workspace)?;
+
+        return Ok(rendered.into_view(cx));
+    }
+
+    let assets = asset_config(cx);
+
+    let model = controllers::contacts::index_with_workspace(
+        assets.resolve(APP_CSS),
+        assets.resolve(PLAIN_CSS),
+        assets.resolve(BOOTSTRAP_JS),
+        assets.resolve(HTMX_JS),
+        workspace,
+    );
+
+    let rendered = renderer.render(CONTACTS_INDEX, &model)?;
 
     Ok(rendered.into_view(cx))
 }

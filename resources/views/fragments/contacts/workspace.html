@@ -1,0 +1,41 @@
+<div
+    id="contacts-workspace"
+    class="row g-4"
+>
+    <section class="col-lg-5">
+        {% include "fragments/contacts/create_form.html" %}
+    </section>
+
+    <section
+        class="col-lg-7"
+        aria-labelledby="contacts-list-heading"
+    >
+        <div
+            class="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-3"
+        >
+            <h2
+                class="h4 mb-0"
+                id="contacts-list-heading"
+            >
+                Existing contacts
+            </h2>
+
+            <button
+                type="button"
+                class="btn btn-outline-primary"
+                hx-get="/view-dx/contacts/list"
+                hx-target="#contacts-list"
+                hx-swap="innerHTML"
+            >
+                Refresh contacts
+            </button>
+        </div>
+
+        <div
+            id="contacts-list"
+            aria-live="polite"
+        >
+            {% include "fragments/contacts/list.html" %}
+        </div>
+    </section>
+</div>
