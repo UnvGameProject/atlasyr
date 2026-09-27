@@ -82,3 +82,29 @@ fn make_view_accepts_dry_run() {
 
     assert!(args.dry_run,);
 }
+
+#[test]
+fn make_controller_accepts_name() {
+    let cli = Cli::try_parse_from(["rusty", "make:controller", "Dashboard"])
+        .expect("make:controller syntax should parse");
+
+    let CliCommand::MakeController(args) = cli.command else {
+        panic!("expected make:controller command");
+    };
+
+    assert_eq!(args.name, "Dashboard",);
+
+    assert!(!args.dry_run,);
+}
+
+#[test]
+fn make_controller_accepts_dry_run() {
+    let cli = Cli::try_parse_from(["rusty", "make:controller", "Dashboard", "--dry-run"])
+        .expect("make:controller --dry-run should parse");
+
+    let CliCommand::MakeController(args) = cli.command else {
+        panic!("expected make:controller command");
+    };
+
+    assert!(args.dry_run,);
+}

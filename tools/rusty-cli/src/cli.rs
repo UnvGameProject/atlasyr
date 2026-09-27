@@ -39,6 +39,12 @@ pub(crate) enum CliCommand {
     )]
     MakeView(ViewArgs),
 
+    #[command(
+        name = "make:controller",
+        about = "Scaffold and register a web presentation controller"
+    )]
+    MakeController(ControllerArgs),
+
     #[command(name = "doctor", about = "Inspect the Rusty CLI project environment")]
     Doctor,
 
@@ -82,6 +88,16 @@ pub(crate) struct TestArgs {
 pub(crate) struct ViewArgs {
     /// View path relative to resources/views/pages, e.g. dashboard/index.
     pub(crate) path: String,
+
+    /// Show what would be generated without changing files.
+    #[arg(long)]
+    pub(crate) dry_run: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ControllerArgs {
+    /// Controller name, e.g. Dashboard or AdminDashboard.
+    pub(crate) name: String,
 
     /// Show what would be generated without changing files.
     #[arg(long)]

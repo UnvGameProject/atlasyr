@@ -699,10 +699,11 @@ Rusty should automate project conventions, not invent another frontend framework
 
 Rusty now provides `make:view` as the foundational View/DX scaffolding primitive. It creates an external HTML page template under `resources/views/pages`, registers an app-owned `ViewName`, adds that view to startup validation, refuses existing paths or symbols, and supports a no-write `--dry-run` preview. It does not infer routes, authentication, controller behavior, htmx behavior, or persistence wiring.
 
+`make:controller` now scaffolds the corresponding web presentation-controller module under `src/web/controllers`, registers it with the existing `pub(in crate::web)` visibility convention, refuses path-like or colliding names, and supports the same no-write `--dry-run` workflow. It creates only the presentation-controller boundary; controller methods and application behavior remain explicit developer decisions.
+
 Likely future View/DX scaffolding includes commands equivalent to:
 
 ```text
-rusty make:controller Dashboard
 rusty make:page Dashboard --path /dashboard
 rusty make:component ...
 rusty make:resource ...
@@ -747,6 +748,8 @@ rusty make:command <command-name>
 rusty make:command <command-name> --dry-run
 rusty make:view <page/path>
 rusty make:view <page/path> --dry-run
+rusty make:controller <Name>
+rusty make:controller <Name> --dry-run
 ```
 
 Current responsibilities include:
