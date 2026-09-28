@@ -9,8 +9,14 @@ use crate::{
 
 use super::{User, UserCredentials, model::UserRow};
 
+const OPERATOR_ROLE: &str = "operator";
+
 impl User {
     /// Persist a previously validated user and previously hashed password.
+    ///
+    /// The current operator provisioning flow creates operators explicitly.
+    /// Future self-registration or lower-privilege provisioning must not rely
+    /// on this helper and should introduce an explicit role-aware boundary.
     ///
     /// Neither an unvalidated email nor a raw password can cross this
     /// persistence boundary through this API.
@@ -28,18 +34,21 @@ impl User {
             INSERT INTO public.users (
                 id,
                 email,
-                password_hash
+                password_hash,
+                role
             )
-            VALUES ($1, $2, $3)
+            VALUES ($1, $2, $3, $4)
             RETURNING
                 id,
                 email,
+                role,
                 created_at,
                 updated_at
             "#,
             id,
             input.email(),
             password_hash,
+            OPERATOR_ROLE,
         )
         .fetch_one(pool)
         .await
@@ -53,6 +62,7 @@ impl User {
             SELECT
                 id,
                 email,
+                role,
                 created_at,
                 updated_at
             FROM public.users
@@ -75,6 +85,7 @@ impl User {
                 id,
                 email,
                 password_hash,
+                role,
                 created_at,
                 updated_at
             FROM public.users
@@ -125,6 +136,7 @@ async fn schema_nullability_contract(pool: &PgPool) -> Result<(), sqlx::Error> {
             id,
             email,
             password_hash,
+            role,
             created_at,
             updated_at
         FROM public.users
@@ -138,6 +150,7 @@ async fn schema_nullability_contract(pool: &PgPool) -> Result<(), sqlx::Error> {
         id: row.id,
         email: row.email,
         password_hash: row.password_hash,
+        role: row.role,
         created_at: row.created_at,
         updated_at: row.updated_at,
     };

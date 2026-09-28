@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                id,\n                email,\n                created_at,\n                updated_at\n            FROM public.users\n            WHERE id = $1\n            ",
+  "query": "\n            SELECT\n                id,\n                email,\n                password_hash,\n                role,\n                created_at,\n                updated_at\n            FROM public.users\n            WHERE lower(email) = lower($1::text)\n            ",
   "describe": {
     "columns": [
       {
@@ -27,6 +27,28 @@
       },
       {
         "ordinal": 2,
+        "name": "password_hash",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "password_hash"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "role",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "role"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -37,7 +59,7 @@
         }
       },
       {
-        "ordinal": 3,
+        "ordinal": 5,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -50,15 +72,17 @@
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Text"
       ]
     },
     "nullable": [
       false,
       false,
       false,
+      false,
+      false,
       false
     ]
   },
-  "hash": "05cd7b14aec1ccbe5a5f2fc2f963629cfaccbc81b51fec5e031e72952c566f1d"
+  "hash": "d7449d0c0eb917d21a760e5258e43cdf90958357faf23cb49cd6a4f251f580d5"
 }

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            id,\n            email,\n            password_hash,\n            created_at,\n            updated_at\n        FROM public.users\n        LIMIT 1\n        ",
+  "query": "\n            INSERT INTO public.users (\n                id,\n                email,\n                password_hash,\n                role\n            )\n            VALUES ($1, $2, $3, $4)\n            RETURNING\n                id,\n                email,\n                role,\n                created_at,\n                updated_at\n            ",
   "describe": {
     "columns": [
       {
@@ -27,12 +27,12 @@
       },
       {
         "ordinal": 2,
-        "name": "password_hash",
+        "name": "role",
         "type_info": "Text",
         "origin": {
           "Table": {
             "table": "users",
-            "name": "password_hash"
+            "name": "role"
           }
         }
       },
@@ -60,7 +60,12 @@
       }
     ],
     "parameters": {
-      "Left": []
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text"
+      ]
     },
     "nullable": [
       false,
@@ -70,5 +75,5 @@
       false
     ]
   },
-  "hash": "2d8882041cb61e832e1f934cbbf2ae69d47975b7d70eadbafbb2e416de04de6e"
+  "hash": "edf61181e23f6d69caecc17b358f28c0e12a9db797849eb8105ccdfd4d7f8c2b"
 }

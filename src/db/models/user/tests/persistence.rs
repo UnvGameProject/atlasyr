@@ -21,6 +21,7 @@ async fn create_persists_validated_user(pool: PgPool) -> Result<(), sqlx::Error>
         .expect("user should be created");
 
     assert_eq!(user.email, "ada@example.com");
+    assert_eq!(user.role, "operator");
 
     let persisted = User::find_by_id(&pool, user.id).await?;
 

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            INSERT INTO public.users (\n                id,\n                email,\n                password_hash\n            )\n            VALUES ($1, $2, $3)\n            RETURNING\n                id,\n                email,\n                created_at,\n                updated_at\n            ",
+  "query": "\n            SELECT\n                id,\n                email,\n                role,\n                created_at,\n                updated_at\n            FROM public.users\n            WHERE id = $1\n            ",
   "describe": {
     "columns": [
       {
@@ -27,6 +27,17 @@
       },
       {
         "ordinal": 2,
+        "name": "role",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "role"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -37,7 +48,7 @@
         }
       },
       {
-        "ordinal": 3,
+        "ordinal": 4,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -50,17 +61,16 @@
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Text",
-        "Text"
+        "Uuid"
       ]
     },
     "nullable": [
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "d73f0178cbbff961fb014501a104cb4c18f1fde1f870a473409c25845b7671cc"
+  "hash": "98388cf43bf7915e476e74e5fa2cc037619dad8b09b4714e8cdef374a4c56549"
 }

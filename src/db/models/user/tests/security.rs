@@ -1,4 +1,5 @@
 use sqlx::PgPool;
+use uuid::Uuid;
 
 use crate::{
     auth::password::{PasswordHash, hash_password, verify_password},
@@ -67,6 +68,40 @@ async fn credentials_debug_output_redacts_password_hash(pool: PgPool) -> Result<
     assert!(debug.contains("[REDACTED]"));
     assert!(!debug.contains("$argon2id$"));
     assert!(!debug.contains("correct horse battery staple"));
+
+    Ok(())
+}
+
+#[sqlx::test]
+async fn database_rejects_unknown_user_role(pool: PgPool) -> Result<(), sqlx::Error> {
+    let error = sqlx::query(
+        r#"
+        INSERT INTO public.users (
+            id,
+            email,
+            password_hash,
+            role
+        )
+        VALUES ($1, $2, $3, $4)
+        "#,
+    )
+    .bind(Uuid::new_v4())
+    .bind("invalid-role@example.com")
+    .bind("test-password-hash")
+    .bind("administrator")
+    .execute(&pool)
+    .await
+    .expect_err("unknown persisted roles must fail closed");
+
+    match &error {
+        sqlx::Error::Database(database_error) => {
+            assert_eq!(database_error.constraint(), Some("users_role_check"),);
+        }
+
+        other => {
+            panic!("expected database constraint failure, got {other:?}");
+        }
+    }
 
     Ok(())
 }
