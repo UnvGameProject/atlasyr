@@ -53,7 +53,7 @@ services:
     working_dir: /workspace
     tmpfs:
       - /workspace/.secrets
-    command: ["sh", "/workspace/assets/scripts/dev-assets.sh"]
+    command: ["sh", "/workspace/docker/assets/dev-assets.sh"]
     volumes:
       - .:/workspace
       - node-modules:/workspace/node_modules
