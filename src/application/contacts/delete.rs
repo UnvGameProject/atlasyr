@@ -1,6 +1,8 @@
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use crate::application::authorization::ContactsDeleteGrant;
+
 use crate::{db::models::contact::Contact, domain::contact::ContactError};
 
 #[derive(Debug)]
@@ -22,6 +24,7 @@ pub(crate) enum DeleteContactOutcome {
 
 pub(crate) async fn delete_contact(
     pool: &PgPool,
+    _authorization: ContactsDeleteGrant,
     command: DeleteContactCommand,
 ) -> Result<DeleteContactOutcome, ContactError> {
     let id = match Uuid::parse_str(&command.id) {

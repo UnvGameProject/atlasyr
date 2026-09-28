@@ -1,6 +1,8 @@
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use crate::application::authorization::ContactsUpdateGrant;
+
 use crate::{
     db::models::contact::Contact,
     domain::contact::{ContactError, UpdateContactInput},
@@ -31,6 +33,7 @@ pub(crate) enum UpdateContactOutcome {
 
 pub(crate) async fn update_contact(
     pool: &PgPool,
+    _authorization: ContactsUpdateGrant,
     command: UpdateContactCommand,
 ) -> Result<UpdateContactOutcome, ContactError> {
     let id = match Uuid::parse_str(&command.id) {

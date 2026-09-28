@@ -11,36 +11,72 @@ use crate::db::models::user::User;
 use super::policy::{Permission, UserRole};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct AuthorizationActor {
-    user_id: Uuid,
+pub(crate) struct AuthorizationActor {
     role: UserRole,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ContactsReadGrant {
+    _private: (),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ContactsCreateGrant {
+    _private: (),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ContactsUpdateGrant {
+    _private: (),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ContactsDeleteGrant {
+    _private: (),
+}
+
 impl AuthorizationActor {
-    fn new(user_id: Uuid, role: UserRole) -> Self {
-        Self { user_id, role }
+    fn new(role: UserRole) -> Self {
+        Self { role }
     }
 
     #[cfg(test)]
-    pub(super) fn for_test(user_id: Uuid, role: UserRole) -> Self {
-        Self::new(user_id, role)
+    pub(super) fn for_test(role: UserRole) -> Self {
+        Self::new(role)
     }
 
-    pub(super) fn user_id(self) -> Uuid {
-        self.user_id
-    }
-
+    #[cfg(test)]
     pub(super) fn role(self) -> UserRole {
         self.role
     }
 
-    pub(super) fn allows(self, permission: Permission) -> bool {
-        self.role.allows(permission)
+    pub(crate) fn contacts_read(self) -> Option<ContactsReadGrant> {
+        self.role
+            .allows(Permission::ContactsRead)
+            .then_some(ContactsReadGrant { _private: () })
+    }
+
+    pub(crate) fn contacts_create(self) -> Option<ContactsCreateGrant> {
+        self.role
+            .allows(Permission::ContactsCreate)
+            .then_some(ContactsCreateGrant { _private: () })
+    }
+
+    pub(crate) fn contacts_update(self) -> Option<ContactsUpdateGrant> {
+        self.role
+            .allows(Permission::ContactsUpdate)
+            .then_some(ContactsUpdateGrant { _private: () })
+    }
+
+    pub(crate) fn contacts_delete(self) -> Option<ContactsDeleteGrant> {
+        self.role
+            .allows(Permission::ContactsDelete)
+            .then_some(ContactsDeleteGrant { _private: () })
     }
 }
 
 #[derive(Debug)]
-pub(super) enum AuthorizationActorError {
+pub(crate) enum AuthorizationActorError {
     Storage(sqlx::Error),
     InvalidPersistedRole,
 }
@@ -73,14 +109,14 @@ impl From<sqlx::Error> for AuthorizationActorError {
     }
 }
 
-/// Resolve one authenticated user ID into application authorization state.
+/// Resolve an authenticated user ID into application authorization state.
 ///
-/// Authentication remains responsible only for proving identity. This boundary
-/// separately resolves that identity into the role used by application policy.
+/// Authentication proves identity. This boundary independently resolves that
+/// identity into the persisted role used by application policy.
 ///
-/// A missing user remains distinguishable from storage failure. An unexpected
-/// persisted role fails closed instead of silently receiving permissions.
-pub(super) async fn load_authorization_actor(
+/// Missing users remain distinguishable from storage failure. Unexpected
+/// persisted roles fail closed rather than receiving implicit permissions.
+pub(crate) async fn load_authorization_actor(
     pool: &PgPool,
     user_id: Uuid,
 ) -> Result<Option<AuthorizationActor>, AuthorizationActorError> {
@@ -91,5 +127,5 @@ pub(super) async fn load_authorization_actor(
     let role = UserRole::from_persisted(&user.role)
         .map_err(|_| AuthorizationActorError::InvalidPersistedRole)?;
 
-    Ok(Some(AuthorizationActor::new(user.id, role)))
+    Ok(Some(AuthorizationActor::new(role)))
 }

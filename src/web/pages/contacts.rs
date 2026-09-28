@@ -1,4 +1,10 @@
-use crate::auth::require_auth;
+use crate::{
+    application::authorization::{
+        AuthorizationActor, ContactsCreateGrant, ContactsDeleteGrant, ContactsReadGrant,
+        ContactsUpdateGrant, load_authorization_actor,
+    },
+    auth::require_auth,
+};
 
 use serde::Deserialize;
 use sqlx::PgPool;
@@ -7,7 +13,11 @@ use topcoat::{
     asset::asset_config,
     context::{Cx, app_context},
     htmx::hx_request,
-    router::{content::Form, error::see_other, page},
+    router::{
+        content::Form,
+        error::{RouterErrorExt, see_other},
+        page,
+    },
     view::View,
 };
 
@@ -47,13 +57,28 @@ struct ContactDeleteForm {
     email: String,
 }
 
+/// Resolve request authentication into the current application authorization
+/// actor.
+///
+/// No session/token representation crosses this boundary. If the authenticated
+/// user disappeared between session resolution and account lookup, the request
+/// no longer has a usable principal and fails as unauthorized.
+async fn require_authorization_actor(cx: &Cx, pool: &PgPool) -> Result<AuthorizationActor> {
+    let identity = require_auth(cx).await?;
+
+    Ok(load_authorization_actor(pool, identity.user_id())
+        .await?
+        .ok_or_unauthorized()?)
+}
+
 #[page("/contacts/list")]
 async fn contacts_list_html(cx: &Cx) -> Result<impl View> {
-    require_auth(cx).await?;
-
     let pool = app_context::<PgPool>(cx);
 
-    let model = controllers::contacts::list(pool).await?;
+    let actor = require_authorization_actor(cx, pool).await?;
+    let read_access: ContactsReadGrant = actor.contacts_read().ok_or_forbidden()?;
+
+    let model = controllers::contacts::list(pool, read_access).await?;
 
     let renderer = app_context::<ViewRenderer>(cx);
 
@@ -64,13 +89,14 @@ async fn contacts_list_html(cx: &Cx) -> Result<impl View> {
 
 #[page("/contacts/{contact_id}/row")]
 async fn contacts_row_html(cx: &Cx) -> Result<impl View> {
-    require_auth(cx).await?;
+    let pool = app_context::<PgPool>(cx);
+
+    let actor = require_authorization_actor(cx, pool).await?;
+    let read_access: ContactsReadGrant = actor.contacts_read().ok_or_forbidden()?;
 
     let id: &str = topcoat::router::path_param::<ContactId>(cx);
 
-    let pool = app_context::<PgPool>(cx);
-
-    let row = controllers::contacts::row(pool, id).await?;
+    let row = controllers::contacts::row(pool, read_access, id).await?;
 
     let renderer = app_context::<ViewRenderer>(cx);
 
@@ -83,11 +109,17 @@ async fn contacts_row_html(cx: &Cx) -> Result<impl View> {
 
 #[page(POST "/contacts/create")]
 async fn contacts_create_html(cx: &Cx, Form(input): Form<ContactCreateForm>) -> Result<impl View> {
-    require_auth(cx).await?;
-
     let pool = app_context::<PgPool>(cx);
 
-    let result = controllers::contacts::create(pool, input.name, input.email).await?;
+    let actor = require_authorization_actor(cx, pool).await?;
+
+    let create_access: ContactsCreateGrant = actor.contacts_create().ok_or_forbidden()?;
+
+    let read_access: ContactsReadGrant = actor.contacts_read().ok_or_forbidden()?;
+
+    let result =
+        controllers::contacts::create(pool, create_access, read_access, input.name, input.email)
+            .await?;
 
     let renderer = app_context::<ViewRenderer>(cx);
 
@@ -120,11 +152,23 @@ async fn contacts_create_html(cx: &Cx, Form(input): Form<ContactCreateForm>) -> 
 
 #[page(POST "/contacts/update")]
 async fn contacts_update_html(cx: &Cx, Form(input): Form<ContactUpdateForm>) -> Result<impl View> {
-    require_auth(cx).await?;
-
     let pool = app_context::<PgPool>(cx);
 
-    let result = controllers::contacts::update(pool, input.id, input.name, input.email).await?;
+    let actor = require_authorization_actor(cx, pool).await?;
+
+    let update_access: ContactsUpdateGrant = actor.contacts_update().ok_or_forbidden()?;
+
+    let read_access: ContactsReadGrant = actor.contacts_read().ok_or_forbidden()?;
+
+    let result = controllers::contacts::update(
+        pool,
+        update_access,
+        read_access,
+        input.id,
+        input.name,
+        input.email,
+    )
+    .await?;
 
     let renderer = app_context::<ViewRenderer>(cx);
 
@@ -142,7 +186,7 @@ async fn contacts_update_html(cx: &Cx, Form(input): Form<ContactUpdateForm>) -> 
 
     let row = result.into_row();
 
-    let workspace = controllers::contacts::workspace_with_row(pool, row).await?;
+    let workspace = controllers::contacts::workspace_with_row(pool, read_access, row).await?;
 
     let assets = asset_config(cx);
 
@@ -161,11 +205,17 @@ async fn contacts_update_html(cx: &Cx, Form(input): Form<ContactUpdateForm>) -> 
 
 #[page(POST "/contacts/delete")]
 async fn contacts_delete_html(cx: &Cx, Form(input): Form<ContactDeleteForm>) -> Result<impl View> {
-    require_auth(cx).await?;
-
     let pool = app_context::<PgPool>(cx);
 
-    let result = controllers::contacts::delete(pool, input.id, input.name, input.email).await?;
+    let actor = require_authorization_actor(cx, pool).await?;
+
+    let delete_access: ContactsDeleteGrant = actor.contacts_delete().ok_or_forbidden()?;
+
+    let read_access: ContactsReadGrant = actor.contacts_read().ok_or_forbidden()?;
+
+    let result =
+        controllers::contacts::delete(pool, delete_access, input.id, input.name, input.email)
+            .await?;
 
     let renderer = app_context::<ViewRenderer>(cx);
 
@@ -191,7 +241,7 @@ async fn contacts_delete_html(cx: &Cx, Form(input): Form<ContactDeleteForm>) -> 
         controllers::contacts::ContactDeleteResult::Row(row) => row,
     };
 
-    let workspace = controllers::contacts::workspace_with_row(pool, row).await?;
+    let workspace = controllers::contacts::workspace_with_row(pool, read_access, row).await?;
 
     let assets = asset_config(cx);
 
@@ -210,13 +260,16 @@ async fn contacts_delete_html(cx: &Cx, Form(input): Form<ContactDeleteForm>) -> 
 
 #[page("/contacts")]
 async fn contacts_html(cx: &Cx) -> Result<impl View> {
-    require_auth(cx).await?;
-
     let pool = app_context::<PgPool>(cx);
+
+    let actor = require_authorization_actor(cx, pool).await?;
+    let read_access: ContactsReadGrant = actor.contacts_read().ok_or_forbidden()?;
+
     let assets = asset_config(cx);
 
     let model = controllers::contacts::index(
         pool,
+        read_access,
         assets.resolve(APP_CSS),
         assets.resolve(PLAIN_CSS),
         assets.resolve(BOOTSTRAP_JS),

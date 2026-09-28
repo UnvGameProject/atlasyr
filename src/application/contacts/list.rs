@@ -1,6 +1,8 @@
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use crate::application::authorization::ContactsReadGrant;
+
 use crate::{db::models::contact::Contact, domain::contact::ContactError};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,6 +24,7 @@ impl From<Contact> for ContactListItem {
 
 pub(crate) async fn find_contact(
     pool: &PgPool,
+    _authorization: ContactsReadGrant,
     id: Uuid,
 ) -> Result<Option<ContactListItem>, ContactError> {
     Contact::find_by_id(pool, id)
@@ -30,7 +33,10 @@ pub(crate) async fn find_contact(
         .map_err(ContactError::storage)
 }
 
-pub(crate) async fn list_contacts(pool: &PgPool) -> Result<Vec<ContactListItem>, ContactError> {
+pub(crate) async fn list_contacts(
+    pool: &PgPool,
+    _authorization: ContactsReadGrant,
+) -> Result<Vec<ContactListItem>, ContactError> {
     Contact::find_all(pool)
         .await
         .map(|contacts| contacts.into_iter().map(ContactListItem::from).collect())

@@ -1,6 +1,10 @@
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use crate::application::authorization::{
+    ContactsCreateGrant, ContactsDeleteGrant, ContactsReadGrant, ContactsUpdateGrant,
+};
+
 use crate::{
     application::contacts::{
         ContactListItem, ContactValidation, CreateContactCommand, CreateContactOutcome,
@@ -83,12 +87,13 @@ impl ContactUpdateResult {
 
 pub(in crate::web) async fn index(
     pool: &PgPool,
+    read_access: ContactsReadGrant,
     app_css_url: String,
     plain_css_url: String,
     bootstrap_js_url: String,
     htmx_js_url: String,
 ) -> Result<ContactsIndexView, ContactError> {
-    let workspace = workspace(pool, ContactCreateFormView::empty()).await?;
+    let workspace = workspace(pool, read_access, ContactCreateFormView::empty()).await?;
 
     Ok(index_with_workspace(
         app_css_url,
@@ -115,24 +120,35 @@ pub(in crate::web) fn index_with_workspace(
     )
 }
 
-pub(in crate::web) async fn list(pool: &PgPool) -> Result<ContactsListView, ContactError> {
-    Ok(ContactsListView::new(contact_rows(pool).await?))
+pub(in crate::web) async fn list(
+    pool: &PgPool,
+    read_access: ContactsReadGrant,
+) -> Result<ContactsListView, ContactError> {
+    Ok(ContactsListView::new(
+        contact_rows(pool, read_access).await?,
+    ))
 }
 
-pub(in crate::web) async fn row(pool: &PgPool, id: &str) -> Result<ContactRowView, ContactError> {
-    Ok(current_contact_row(pool, id)
+pub(in crate::web) async fn row(
+    pool: &PgPool,
+    read_access: ContactsReadGrant,
+    id: &str,
+) -> Result<ContactRowView, ContactError> {
+    Ok(current_contact_row(pool, read_access, id)
         .await?
         .unwrap_or_else(|| ContactRowView::unavailable(id.to_owned(), NOT_FOUND_MESSAGE)))
 }
 
 pub(in crate::web) async fn create(
     pool: &PgPool,
+    create_access: ContactsCreateGrant,
+    read_access: ContactsReadGrant,
     name: String,
     email: String,
 ) -> Result<ContactCreateResult, ContactError> {
     let command = CreateContactCommand::new(name.clone(), email.clone());
 
-    let (form, succeeded) = match create_contact_use_case(pool, command).await {
+    let (form, succeeded) = match create_contact_use_case(pool, create_access, command).await {
         Ok(outcome) => {
             let succeeded = matches!(&outcome, CreateContactOutcome::Created);
 
@@ -157,7 +173,7 @@ pub(in crate::web) async fn create(
         }
     };
 
-    let workspace = workspace(pool, form).await?;
+    let workspace = workspace(pool, read_access, form).await?;
 
     Ok(if succeeded {
         ContactCreateResult::Created(workspace)
@@ -168,19 +184,21 @@ pub(in crate::web) async fn create(
 
 pub(in crate::web) async fn update(
     pool: &PgPool,
+    update_access: ContactsUpdateGrant,
+    read_access: ContactsReadGrant,
     id: String,
     name: String,
     email: String,
 ) -> Result<ContactUpdateResult, ContactError> {
     let command = UpdateContactCommand::new(id.clone(), name.clone(), email.clone());
 
-    let outcome = match update_contact_use_case(pool, command).await {
+    let outcome = match update_contact_use_case(pool, update_access, command).await {
         Ok(outcome) => outcome,
 
         Err(error) => {
             eprintln!("contact update failed: {error:?}");
 
-            let current = current_contact_row(pool, &id).await?;
+            let current = current_contact_row(pool, read_access, &id).await?;
 
             let row = current
                 .map(|row| row.editing(name, email, None, Some(UPDATE_ERROR_MESSAGE), None, None))
@@ -195,7 +213,7 @@ pub(in crate::web) async fn update(
     let current = match outcome {
         UpdateContactOutcome::NotFound => None,
 
-        _ => current_contact_row(pool, &id).await?,
+        _ => current_contact_row(pool, read_access, &id).await?,
     };
 
     let row = update_row_for_outcome(current, id, name, email, outcome);
@@ -209,13 +227,14 @@ pub(in crate::web) async fn update(
 
 pub(in crate::web) async fn delete(
     pool: &PgPool,
+    delete_access: ContactsDeleteGrant,
     id: String,
     name: String,
     email: String,
 ) -> Result<ContactDeleteResult, ContactError> {
     let command = DeleteContactCommand::new(id.clone());
 
-    match delete_contact_use_case(pool, command).await {
+    match delete_contact_use_case(pool, delete_access, command).await {
         Ok(outcome) => Ok(delete_result_for_outcome(id, outcome)),
 
         Err(error) => {
@@ -230,11 +249,12 @@ pub(in crate::web) async fn delete(
 
 pub(in crate::web) async fn workspace_with_row(
     pool: &PgPool,
+    read_access: ContactsReadGrant,
     row: ContactRowView,
 ) -> Result<ContactsWorkspaceView, ContactError> {
     let row_id = row.id().to_owned();
 
-    let mut contacts = contact_rows(pool).await?;
+    let mut contacts = contact_rows(pool, read_access).await?;
 
     if let Some(position) = contacts.iter().position(|contact| contact.id() == row_id) {
         contacts[position] = row;
@@ -250,24 +270,32 @@ pub(in crate::web) async fn workspace_with_row(
 
 async fn workspace(
     pool: &PgPool,
+    read_access: ContactsReadGrant,
     form: ContactCreateFormView,
 ) -> Result<ContactsWorkspaceView, ContactError> {
-    Ok(ContactsWorkspaceView::new(form, contact_rows(pool).await?))
+    Ok(ContactsWorkspaceView::new(
+        form,
+        contact_rows(pool, read_access).await?,
+    ))
 }
 
 async fn current_contact_row(
     pool: &PgPool,
+    read_access: ContactsReadGrant,
     id: &str,
 ) -> Result<Option<ContactRowView>, ContactError> {
     let Ok(id) = Uuid::parse_str(id) else {
         return Ok(None);
     };
 
-    Ok(find_contact(pool, id).await?.map(contact_row))
+    Ok(find_contact(pool, read_access, id).await?.map(contact_row))
 }
 
-async fn contact_rows(pool: &PgPool) -> Result<Vec<ContactRowView>, ContactError> {
-    Ok(list_contacts(pool)
+async fn contact_rows(
+    pool: &PgPool,
+    read_access: ContactsReadGrant,
+) -> Result<Vec<ContactRowView>, ContactError> {
+    Ok(list_contacts(pool, read_access)
         .await?
         .into_iter()
         .map(contact_row)

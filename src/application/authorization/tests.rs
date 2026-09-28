@@ -22,45 +22,31 @@ async fn create_test_user(pool: &PgPool, email: &str) -> User {
 }
 
 fn actor(role: UserRole) -> AuthorizationActor {
-    AuthorizationActor::for_test(Uuid::nil(), role)
+    AuthorizationActor::for_test(role)
 }
 
 #[test]
-fn operator_can_use_every_contacts_permission() {
+fn operator_can_receive_every_contacts_grant() {
     let actor = actor(UserRole::Operator);
 
-    for permission in [
-        Permission::ContactsRead,
-        Permission::ContactsCreate,
-        Permission::ContactsUpdate,
-        Permission::ContactsDelete,
-    ] {
-        assert!(
-            actor.allows(permission),
-            "operator should allow {permission:?}"
-        );
-    }
+    assert!(actor.contacts_read().is_some());
+    assert!(actor.contacts_create().is_some());
+    assert!(actor.contacts_update().is_some());
+    assert!(actor.contacts_delete().is_some());
 }
 
 #[test]
-fn viewer_can_read_contacts() {
-    assert!(actor(UserRole::Viewer).allows(Permission::ContactsRead));
+fn viewer_can_receive_read_grant() {
+    assert!(actor(UserRole::Viewer).contacts_read().is_some());
 }
 
 #[test]
-fn viewer_cannot_mutate_contacts() {
+fn viewer_cannot_receive_mutation_grants() {
     let actor = actor(UserRole::Viewer);
 
-    for permission in [
-        Permission::ContactsCreate,
-        Permission::ContactsUpdate,
-        Permission::ContactsDelete,
-    ] {
-        assert!(
-            !actor.allows(permission),
-            "viewer should deny {permission:?}"
-        );
-    }
+    assert!(actor.contacts_create().is_none());
+    assert!(actor.contacts_update().is_none());
+    assert!(actor.contacts_delete().is_none());
 }
 
 #[test]
@@ -77,6 +63,19 @@ fn unknown_persisted_role_fails_closed() {
     assert!(UserRole::from_persisted("").is_err());
 }
 
+#[test]
+fn role_policy_remains_explicit() {
+    assert!(UserRole::Operator.allows(Permission::ContactsRead));
+    assert!(UserRole::Operator.allows(Permission::ContactsCreate));
+    assert!(UserRole::Operator.allows(Permission::ContactsUpdate));
+    assert!(UserRole::Operator.allows(Permission::ContactsDelete));
+
+    assert!(UserRole::Viewer.allows(Permission::ContactsRead));
+    assert!(!UserRole::Viewer.allows(Permission::ContactsCreate));
+    assert!(!UserRole::Viewer.allows(Permission::ContactsUpdate));
+    assert!(!UserRole::Viewer.allows(Permission::ContactsDelete));
+}
+
 #[sqlx::test]
 async fn operator_user_loads_as_operator_actor(pool: PgPool) {
     let user = create_test_user(&pool, "operator-actor@example.com").await;
@@ -86,13 +85,12 @@ async fn operator_user_loads_as_operator_actor(pool: PgPool) {
         .expect("authorization lookup should succeed")
         .expect("authorization actor should exist");
 
-    assert_eq!(actor.user_id(), user.id);
     assert_eq!(actor.role(), UserRole::Operator);
 
-    assert!(actor.allows(Permission::ContactsRead));
-    assert!(actor.allows(Permission::ContactsCreate));
-    assert!(actor.allows(Permission::ContactsUpdate));
-    assert!(actor.allows(Permission::ContactsDelete));
+    assert!(actor.contacts_read().is_some());
+    assert!(actor.contacts_create().is_some());
+    assert!(actor.contacts_update().is_some());
+    assert!(actor.contacts_delete().is_some());
 }
 
 #[sqlx::test]
@@ -116,13 +114,12 @@ async fn viewer_user_loads_as_viewer_actor(pool: PgPool) {
         .expect("authorization lookup should succeed")
         .expect("authorization actor should exist");
 
-    assert_eq!(actor.user_id(), user.id);
     assert_eq!(actor.role(), UserRole::Viewer);
 
-    assert!(actor.allows(Permission::ContactsRead));
-    assert!(!actor.allows(Permission::ContactsCreate));
-    assert!(!actor.allows(Permission::ContactsUpdate));
-    assert!(!actor.allows(Permission::ContactsDelete));
+    assert!(actor.contacts_read().is_some());
+    assert!(actor.contacts_create().is_none());
+    assert!(actor.contacts_update().is_none());
+    assert!(actor.contacts_delete().is_none());
 }
 
 #[sqlx::test]

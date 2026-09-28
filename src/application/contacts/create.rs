@@ -1,5 +1,7 @@
 use sqlx::PgPool;
 
+use crate::application::authorization::ContactsCreateGrant;
+
 use crate::{
     db::models::contact::Contact,
     domain::contact::{ContactError, CreateContactInput},
@@ -28,6 +30,7 @@ pub(crate) enum CreateContactOutcome {
 
 pub(crate) async fn create_contact(
     pool: &PgPool,
+    _authorization: ContactsCreateGrant,
     command: CreateContactCommand,
 ) -> Result<CreateContactOutcome, ContactError> {
     let input = CreateContactInput::from_untrusted(command.name, command.email);
