@@ -45,6 +45,12 @@ pub(crate) enum CliCommand {
     )]
     MakeController(ControllerArgs),
 
+    #[command(
+        name = "make:view-model",
+        about = "Scaffold and register a serializable web view model"
+    )]
+    MakeViewModel(ViewModelArgs),
+
     #[command(name = "doctor", about = "Inspect the Rusty CLI project environment")]
     Doctor,
 
@@ -97,6 +103,16 @@ pub(crate) struct ViewArgs {
 #[derive(Debug, Args)]
 pub(crate) struct ControllerArgs {
     /// Controller name, e.g. Dashboard or AdminDashboard.
+    pub(crate) name: String,
+
+    /// Show what would be generated without changing files.
+    #[arg(long)]
+    pub(crate) dry_run: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ViewModelArgs {
+    /// View-model name, e.g. Dashboard or AdminDashboard.
     pub(crate) name: String,
 
     /// Show what would be generated without changing files.

@@ -2,6 +2,7 @@ mod doctor;
 mod make_command;
 mod make_controller;
 mod make_view;
+mod make_view_model;
 mod migration;
 mod test;
 
@@ -22,6 +23,7 @@ pub(crate) fn run(command: CliCommand) -> CommandResult {
         CliCommand::MakeCommand(args) => make_command::run(args),
         CliCommand::MakeController(args) => make_controller::run(args),
         CliCommand::MakeView(args) => make_view::run(args),
+        CliCommand::MakeViewModel(args) => make_view_model::run(args),
         CliCommand::Doctor => doctor::run(),
         CliCommand::Audit => audit::run(),
         // RUSTY_COMMAND_DISPATCH

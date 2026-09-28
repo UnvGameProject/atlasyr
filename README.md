@@ -701,6 +701,8 @@ Rusty now provides `make:view` as the foundational View/DX scaffolding primitive
 
 `make:controller` now scaffolds the corresponding web presentation-controller module under `src/web/controllers`, registers it with the existing `pub(in crate::web)` visibility convention, refuses path-like or colliding names, and supports the same no-write `--dry-run` workflow. It creates only the presentation-controller boundary; controller methods and application behavior remain explicit developer decisions.
 
+`make:view-model` now scaffolds a serializable presentation model under `src/web/view_models`, registers its private module, re-exports the generated `<Name>View` through the existing `pub(in crate::web)` boundary, refuses path-like or colliding names, and supports `--dry-run`. The generated type is intentionally minimal; fields and application-specific data remain explicit developer decisions.
+
 Likely future View/DX scaffolding includes commands equivalent to:
 
 ```text
@@ -750,6 +752,8 @@ rusty make:view <page/path>
 rusty make:view <page/path> --dry-run
 rusty make:controller <Name>
 rusty make:controller <Name> --dry-run
+rusty make:view-model <Name>
+rusty make:view-model <Name> --dry-run
 ```
 
 Current responsibilities include:
