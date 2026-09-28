@@ -51,6 +51,12 @@ pub(crate) enum CliCommand {
     )]
     MakeViewModel(ViewModelArgs),
 
+    #[command(
+        name = "make:page",
+        about = "Scaffold a complete public HTML-first GET page"
+    )]
+    MakePage(PageArgs),
+
     #[command(name = "doctor", about = "Inspect the Rusty CLI project environment")]
     Doctor,
 
@@ -116,6 +122,20 @@ pub(crate) struct ViewModelArgs {
     pub(crate) name: String,
 
     /// Show what would be generated without changing files.
+    #[arg(long)]
+    pub(crate) dry_run: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct PageArgs {
+    /// Page name, e.g. Dashboard or AdminDashboard.
+    pub(crate) name: String,
+
+    /// Static public GET route, e.g. /dashboard.
+    #[arg(long)]
+    pub(crate) path: String,
+
+    /// Show the complete scaffold plan without changing files.
     #[arg(long)]
     pub(crate) dry_run: bool,
 }

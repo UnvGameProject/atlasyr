@@ -134,3 +134,38 @@ fn make_view_model_accepts_dry_run() {
 
     assert!(args.dry_run,);
 }
+
+#[test]
+fn make_page_accepts_name_and_path() {
+    let cli = Cli::try_parse_from(["rusty", "make:page", "Dashboard", "--path", "/dashboard"])
+        .expect("make:page syntax should parse");
+
+    let CliCommand::MakePage(args) = cli.command else {
+        panic!("expected make:page command");
+    };
+
+    assert_eq!(args.name, "Dashboard",);
+
+    assert_eq!(args.path, "/dashboard",);
+
+    assert!(!args.dry_run,);
+}
+
+#[test]
+fn make_page_accepts_dry_run() {
+    let cli = Cli::try_parse_from([
+        "rusty",
+        "make:page",
+        "Dashboard",
+        "--path",
+        "/dashboard",
+        "--dry-run",
+    ])
+    .expect("make:page --dry-run should parse");
+
+    let CliCommand::MakePage(args) = cli.command else {
+        panic!("expected make:page command");
+    };
+
+    assert!(args.dry_run,);
+}

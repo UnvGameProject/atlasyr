@@ -703,10 +703,11 @@ Rusty now provides `make:view` as the foundational View/DX scaffolding primitive
 
 `make:view-model` now scaffolds a serializable presentation model under `src/web/view_models`, registers its private module, re-exports the generated `<Name>View` through the existing `pub(in crate::web)` boundary, refuses path-like or colliding names, and supports `--dry-run`. The generated type is intentionally minimal; fields and application-specific data remain explicit developer decisions.
 
+`make:page` now scaffolds a complete public HTML-first GET page as one atomic plan: page module, presentation controller, asset-aware serializable view model, registered external HTML view, and all required module/view registrations. It preflights the entire scaffold before writing, refuses existing routes or boundaries, validates only static GET paths in this first version, supports `--dry-run`, and rolls back applied changes if a later write fails. It deliberately does not infer authentication, database access, htmx behavior, forms, mutations, or application use cases.
+
 Likely future View/DX scaffolding includes commands equivalent to:
 
 ```text
-rusty make:page Dashboard --path /dashboard
 rusty make:component ...
 rusty make:resource ...
 ```
@@ -754,6 +755,8 @@ rusty make:controller <Name>
 rusty make:controller <Name> --dry-run
 rusty make:view-model <Name>
 rusty make:view-model <Name> --dry-run
+rusty make:page <Name> --path /route
+rusty make:page <Name> --path /route --dry-run
 ```
 
 Current responsibilities include:
