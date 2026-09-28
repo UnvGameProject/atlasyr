@@ -1,3 +1,4 @@
+
 # Topcoat POC
 
 A security-first, Dockerized proof of concept for evaluating **Topcoat** as a Rust frontend/full-stack framework against a mature **Laravel + Livewire-style** development baseline.
@@ -715,6 +716,27 @@ rusty make:resource ...
 Exact command names are not yet committed.
 
 Rusty may create route/controller/view registrations and validation checks, but it should not become a custom HTML parser, template language, browser-reactivity VM, or Livewire clone.
+
+## Frontend asset source layout
+
+Authored browser-facing source lives under `resources/`, while generated browser artifacts remain under `generated/`.
+
+```text
+resources/
+├── views/
+├── css/
+├── scss/
+├── js/
+└── images/
+
+generated/
+├── app.css
+├── app.css.map
+├── bootstrap.bundle.min.js
+└── htmx.min.js
+```
+
+Plain CSS and SCSS are both first-class styling options. Bootstrap is consumed from pinned source SCSS, while htmx and the Bootstrap JavaScript bundle are copied from pinned development dependencies. `generated/` is build output rather than authored application source.
 
 ## Rusty CLI developer tooling
 
