@@ -419,7 +419,7 @@ Verified:
 - login, logout, authenticated navigation, and protected-route enforcement
 - session persistence across refreshes
 - session lifetime profile with idle, absolute, and refresh windows
-- operator-created users through the project CLI flow without placing passwords in argv or environment variables
+- explicit viewer/operator provisioning through the project CLI flow without placing passwords in argv or environment variables
 - automated authentication/session lifecycle coverage
 
 Public self-registration, password reset, email verification, and MFA are not part of the completed baseline and remain separate future capabilities.
@@ -981,7 +981,7 @@ Current invariants:
 
 The current local session profile uses bounded idle and absolute lifetimes plus a refresh window. Session rotation remains an explicit security seam rather than being simulated with custom application tokens.
 
-The application also provides an operator user-creation flow that reads the password interactively instead of accepting it through command-line arguments or environment variables.
+The application also provides an operator-controlled user-provisioning flow that requires an explicit `viewer` or `operator` role while continuing to read the password interactively instead of accepting it through command-line arguments or environment variables.
 
 Public self-registration, password reset, email verification, and MFA remain future account-lifecycle capabilities rather than requirements for the completed POC authentication baseline.
 

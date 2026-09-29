@@ -15,34 +15,47 @@ async fn main() {
 }
 
 async fn run() -> Result<(), Box<dyn Error + Send + Sync>> {
-    let email = parse_email_argument()?;
+    let (email, role) = parse_arguments()?;
 
     let password = read_password_from_stdin()?;
 
-    topcoat_poc::run_create_user(email, password).await?;
+    topcoat_poc::run_create_user(email, role, password).await?;
 
     println!("User created.");
 
     Ok(())
 }
 
-fn parse_email_argument() -> Result<String, io::Error> {
+fn parse_arguments() -> Result<(String, String), io::Error> {
     let mut arguments = env::args_os();
 
     let _program = arguments.next();
 
-    let email = arguments
-        .next()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "usage: create-user <email>"))?;
+    let email = arguments.next().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "usage: create-user <email> <viewer|operator>",
+        )
+    })?;
+
+    let role = arguments.next().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "usage: create-user <email> <viewer|operator>",
+        )
+    })?;
 
     if arguments.next().is_some() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "usage: create-user <email>",
+            "usage: create-user <email> <viewer|operator>",
         ));
     }
 
-    os_string_to_utf8(email, "email must be valid UTF-8")
+    Ok((
+        os_string_to_utf8(email, "email must be valid UTF-8")?,
+        os_string_to_utf8(role, "role must be valid UTF-8")?,
+    ))
 }
 
 fn os_string_to_utf8(value: OsString, message: &'static str) -> Result<String, io::Error> {

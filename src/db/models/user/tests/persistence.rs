@@ -31,6 +31,31 @@ async fn create_persists_validated_user(pool: PgPool) -> Result<(), sqlx::Error>
 }
 
 #[sqlx::test]
+async fn create_viewer_persists_viewer_role(pool: PgPool) -> Result<(), sqlx::Error> {
+    let input = CreateUserInput::from_untrusted("viewer@example.com")
+        .validate()
+        .expect("viewer input should be valid");
+
+    let user = User::create_viewer(
+        &pool,
+        &input,
+        hash_password("correct horse battery staple").expect("password should hash"),
+    )
+    .await
+    .expect("viewer should be created");
+
+    assert_eq!(user.email, "viewer@example.com",);
+
+    assert_eq!(user.role, "viewer");
+
+    let persisted = User::find_by_id(&pool, user.id).await?;
+
+    assert_eq!(persisted, Some(user));
+
+    Ok(())
+}
+
+#[sqlx::test]
 async fn create_maps_duplicate_email_to_user_error(pool: PgPool) -> Result<(), sqlx::Error> {
     let first = CreateUserInput::from_untrusted("ada@example.com")
         .validate()

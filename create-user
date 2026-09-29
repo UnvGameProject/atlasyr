@@ -3,12 +3,23 @@
 set -euo pipefail
 set +x
 
-if [ "$#" -ne 1 ]; then
-    echo "Usage: ./create-user <email>" >&2
+if [ "$#" -ne 2 ]; then
+    echo "Usage: ./create-user <email> <viewer|operator>" >&2
     exit 2
 fi
 
 email="$1"
+role="$2"
+
+case "$role" in
+    viewer|operator)
+        ;;
+
+    *)
+        echo 'Role must be exactly "viewer" or "operator".' >&2
+        exit 2
+        ;;
+esac
 
 password=''
 confirmation=''
@@ -55,5 +66,6 @@ printf '%s\n' "$password" |
         --locked \
         --bin create-user \
         -- \
-        "$email"
+        "$email" \
+        "$role"
 )

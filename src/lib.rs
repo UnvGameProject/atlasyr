@@ -27,10 +27,17 @@ pub async fn run_migrations() -> AppResult<()> {
     Ok(())
 }
 
-pub async fn run_create_user(email: String, password: String) -> AppResult<()> {
+pub async fn run_create_user(email: String, role: String, password: String) -> AppResult<()> {
     use std::io::{Error as IoError, ErrorKind};
 
-    use application::auth::{CreateUserCommand, CreateUserOutcome, create_user};
+    use application::auth::{CreateUserCommand, CreateUserOutcome, CreateUserRole, create_user};
+
+    let role = CreateUserRole::from_operator_input(&role).ok_or_else(|| {
+        IoError::new(
+            ErrorKind::InvalidInput,
+            r#"role must be exactly "viewer" or "operator""#,
+        )
+    })?;
 
     let database_config = config::DatabaseConfig::load()?;
 
@@ -38,7 +45,7 @@ pub async fn run_create_user(email: String, password: String) -> AppResult<()> {
 
     db::healthcheck(&database).await?;
 
-    let result = create_user(&database, CreateUserCommand::new(email, password)).await;
+    let result = create_user(&database, CreateUserCommand::new(email, role, password)).await;
 
     database.close().await;
 

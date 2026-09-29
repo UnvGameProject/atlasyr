@@ -10,22 +10,53 @@ use crate::{
 use super::{User, UserCredentials, model::UserRow};
 
 const OPERATOR_ROLE: &str = "operator";
+const VIEWER_ROLE: &str = "viewer";
+
+#[derive(Debug, Clone, Copy)]
+enum PersistedNewUserRole {
+    Operator,
+    Viewer,
+}
+
+impl PersistedNewUserRole {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Operator => OPERATOR_ROLE,
+            Self::Viewer => VIEWER_ROLE,
+        }
+    }
+}
 
 impl User {
-    /// Persist a previously validated user and previously hashed password.
+    /// Persist an explicitly provisioned operator.
     ///
-    /// The current operator provisioning flow creates operators explicitly.
-    /// Future self-registration or lower-privilege provisioning must not rely
-    /// on this helper and should introduce an explicit role-aware boundary.
-    ///
-    /// Neither an unvalidated email nor a raw password can cross this
-    /// persistence boundary through this API.
+    /// This remains the existing trusted operator path so current internal
+    /// callers do not silently change privilege semantics.
     pub(crate) async fn create(
         pool: &PgPool,
         input: &Valid<CreateUserInput>,
         password_hash: PasswordHash,
     ) -> Result<Self, UserError> {
+        Self::create_with_role(pool, input, password_hash, PersistedNewUserRole::Operator).await
+    }
+
+    /// Persist an explicitly provisioned least-privilege viewer.
+    pub(crate) async fn create_viewer(
+        pool: &PgPool,
+        input: &Valid<CreateUserInput>,
+        password_hash: PasswordHash,
+    ) -> Result<Self, UserError> {
+        Self::create_with_role(pool, input, password_hash, PersistedNewUserRole::Viewer).await
+    }
+
+    async fn create_with_role(
+        pool: &PgPool,
+        input: &Valid<CreateUserInput>,
+        password_hash: PasswordHash,
+        role: PersistedNewUserRole,
+    ) -> Result<Self, UserError> {
         let id = Uuid::new_v4();
+
         let password_hash = password_hash.into_string();
 
         sqlx::query_as!(
@@ -48,7 +79,7 @@ impl User {
             id,
             input.email(),
             password_hash,
-            OPERATOR_ROLE,
+            role.as_str(),
         )
         .fetch_one(pool)
         .await

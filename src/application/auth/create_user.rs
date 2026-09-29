@@ -13,14 +13,39 @@ use crate::{
 
 const MAX_PASSWORD_BYTES: usize = 1024;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CreateUserRole {
+    Viewer,
+    Operator,
+}
+
+impl CreateUserRole {
+    /// Parse the trusted operator CLI representation exactly.
+    ///
+    /// Role names are deliberately case-sensitive. There is no fallback role:
+    /// an unknown value must be rejected before persistence.
+    pub(crate) fn from_operator_input(value: &str) -> Option<Self> {
+        match value {
+            "viewer" => Some(Self::Viewer),
+            "operator" => Some(Self::Operator),
+            _ => None,
+        }
+    }
+}
+
 pub(crate) struct CreateUserCommand {
     email: String,
+    role: CreateUserRole,
     password: String,
 }
 
 impl CreateUserCommand {
-    pub(crate) fn new(email: String, password: String) -> Self {
-        Self { email, password }
+    pub(crate) fn new(email: String, role: CreateUserRole, password: String) -> Self {
+        Self {
+            email,
+            role,
+            password,
+        }
     }
 }
 
@@ -29,6 +54,7 @@ impl Debug for CreateUserCommand {
         formatter
             .debug_struct("CreateUserCommand")
             .field("email", &self.email)
+            .field("role", &self.role)
             .field("password", &"[REDACTED]")
             .finish()
     }
@@ -86,7 +112,13 @@ pub(crate) async fn create_user(
     let password_hash =
         hash_password(&command.password).map_err(|_| CreateUserError::PasswordHash)?;
 
-    match User::create(pool, &input, password_hash).await {
+    let result = match command.role {
+        CreateUserRole::Viewer => User::create_viewer(pool, &input, password_hash).await,
+
+        CreateUserRole::Operator => User::create(pool, &input, password_hash).await,
+    };
+
+    match result {
         Ok(_) => Ok(CreateUserOutcome::Created),
 
         Err(UserError::EmailAlreadyExists) => Ok(CreateUserOutcome::EmailAlreadyExists),
@@ -101,18 +133,40 @@ mod tests {
 
     use crate::db::models::user::User;
 
-    use super::{CreateUserCommand, CreateUserOutcome, create_user};
+    use super::{CreateUserCommand, CreateUserOutcome, CreateUserRole, create_user};
+
+    #[test]
+    fn role_parser_is_exact_and_case_sensitive() {
+        assert_eq!(
+            CreateUserRole::from_operator_input("viewer",),
+            Some(CreateUserRole::Viewer),
+        );
+
+        assert_eq!(
+            CreateUserRole::from_operator_input("operator",),
+            Some(CreateUserRole::Operator),
+        );
+
+        assert_eq!(CreateUserRole::from_operator_input("Viewer",), None,);
+
+        assert_eq!(CreateUserRole::from_operator_input("administrator",), None,);
+
+        assert_eq!(CreateUserRole::from_operator_input(""), None,);
+    }
 
     #[test]
     fn command_debug_redacts_password() {
         let command = CreateUserCommand::new(
             "operator@example.com".to_owned(),
+            CreateUserRole::Operator,
             "do-not-print-this".to_owned(),
         );
 
         let debug = format!("{command:?}");
 
         assert!(debug.contains("operator@example.com"));
+
+        assert!(debug.contains("Operator"));
 
         assert!(debug.contains("[REDACTED]"));
 
@@ -123,7 +177,11 @@ mod tests {
     async fn rejects_invalid_email(pool: PgPool) {
         let outcome = create_user(
             &pool,
-            CreateUserCommand::new("not-an-email".to_owned(), "test-password".to_owned()),
+            CreateUserCommand::new(
+                "not-an-email".to_owned(),
+                CreateUserRole::Viewer,
+                "test-password".to_owned(),
+            ),
         )
         .await
         .expect("invalid input should not be a backend error");
@@ -132,25 +190,51 @@ mod tests {
     }
 
     #[sqlx::test]
-    async fn creates_normalized_user(pool: PgPool) {
+    async fn creates_normalized_viewer(pool: PgPool) {
         let outcome = create_user(
             &pool,
             CreateUserCommand::new(
-                "  OPERATOR@EXAMPLE.COM  ".to_owned(),
+                "  VIEWER@EXAMPLE.COM  ".to_owned(),
+                CreateUserRole::Viewer,
                 "test-password".to_owned(),
             ),
         )
         .await
-        .expect("user creation should succeed");
+        .expect("viewer creation should succeed");
+
+        assert_eq!(outcome, CreateUserOutcome::Created,);
+
+        let credentials = User::find_credentials_by_email(&pool, "viewer@example.com")
+            .await
+            .expect("credential lookup should succeed")
+            .expect("created viewer should exist");
+
+        assert_eq!(credentials.user().email, "viewer@example.com",);
+
+        assert_eq!(credentials.user().role, "viewer",);
+    }
+
+    #[sqlx::test]
+    async fn creates_operator(pool: PgPool) {
+        let outcome = create_user(
+            &pool,
+            CreateUserCommand::new(
+                "operator@example.com".to_owned(),
+                CreateUserRole::Operator,
+                "test-password".to_owned(),
+            ),
+        )
+        .await
+        .expect("operator creation should succeed");
 
         assert_eq!(outcome, CreateUserOutcome::Created,);
 
         let credentials = User::find_credentials_by_email(&pool, "operator@example.com")
             .await
             .expect("credential lookup should succeed")
-            .expect("created user should exist");
+            .expect("created operator should exist");
 
-        assert_eq!(credentials.user().email, "operator@example.com",);
+        assert_eq!(credentials.user().role, "operator",);
     }
 
     #[sqlx::test]
@@ -159,6 +243,7 @@ mod tests {
             &pool,
             CreateUserCommand::new(
                 "duplicate@example.com".to_owned(),
+                CreateUserRole::Viewer,
                 "first-test-password".to_owned(),
             ),
         )
@@ -171,6 +256,7 @@ mod tests {
             &pool,
             CreateUserCommand::new(
                 "DUPLICATE@example.com".to_owned(),
+                CreateUserRole::Viewer,
                 "second-test-password".to_owned(),
             ),
         )
