@@ -15,7 +15,7 @@ use crate::{
     domain::contact::ContactError,
     web::view_models::{
         ContactCreateFormView, ContactRowView, ContactsIndexView, ContactsListView,
-        ContactsWorkspaceView,
+        ContactsPresentationAccess, ContactsWorkspaceView,
     },
 };
 
@@ -88,12 +88,19 @@ impl ContactUpdateResult {
 pub(in crate::web) async fn index(
     pool: &PgPool,
     read_access: ContactsReadGrant,
+    presentation_access: ContactsPresentationAccess,
     app_css_url: String,
     plain_css_url: String,
     bootstrap_js_url: String,
     htmx_js_url: String,
 ) -> Result<ContactsIndexView, ContactError> {
-    let workspace = workspace(pool, read_access, ContactCreateFormView::empty()).await?;
+    let workspace = workspace(
+        pool,
+        read_access,
+        presentation_access,
+        ContactCreateFormView::empty(),
+    )
+    .await?;
 
     Ok(index_with_workspace(
         app_css_url,
@@ -123,8 +130,10 @@ pub(in crate::web) fn index_with_workspace(
 pub(in crate::web) async fn list(
     pool: &PgPool,
     read_access: ContactsReadGrant,
+    presentation_access: ContactsPresentationAccess,
 ) -> Result<ContactsListView, ContactError> {
     Ok(ContactsListView::new(
+        presentation_access,
         contact_rows(pool, read_access).await?,
     ))
 }
@@ -143,6 +152,7 @@ pub(in crate::web) async fn create(
     pool: &PgPool,
     create_access: ContactsCreateGrant,
     read_access: ContactsReadGrant,
+    presentation_access: ContactsPresentationAccess,
     name: String,
     email: String,
 ) -> Result<ContactCreateResult, ContactError> {
@@ -173,7 +183,7 @@ pub(in crate::web) async fn create(
         }
     };
 
-    let workspace = workspace(pool, read_access, form).await?;
+    let workspace = workspace(pool, read_access, presentation_access, form).await?;
 
     Ok(if succeeded {
         ContactCreateResult::Created(workspace)
@@ -250,6 +260,7 @@ pub(in crate::web) async fn delete(
 pub(in crate::web) async fn workspace_with_row(
     pool: &PgPool,
     read_access: ContactsReadGrant,
+    presentation_access: ContactsPresentationAccess,
     row: ContactRowView,
 ) -> Result<ContactsWorkspaceView, ContactError> {
     let row_id = row.id().to_owned();
@@ -263,6 +274,7 @@ pub(in crate::web) async fn workspace_with_row(
     }
 
     Ok(ContactsWorkspaceView::new(
+        presentation_access,
         ContactCreateFormView::empty(),
         contacts,
     ))
@@ -271,9 +283,11 @@ pub(in crate::web) async fn workspace_with_row(
 async fn workspace(
     pool: &PgPool,
     read_access: ContactsReadGrant,
+    presentation_access: ContactsPresentationAccess,
     form: ContactCreateFormView,
 ) -> Result<ContactsWorkspaceView, ContactError> {
     Ok(ContactsWorkspaceView::new(
+        presentation_access,
         form,
         contact_rows(pool, read_access).await?,
     ))

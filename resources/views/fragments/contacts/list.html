@@ -12,12 +12,14 @@
                             Email
                         </th>
 
-                        <th
-                            class="text-end"
-                            scope="col"
-                        >
-                            Actions
-                        </th>
+                        {% if can_update or can_delete %}
+                            <th
+                                class="text-end"
+                                scope="col"
+                            >
+                                Actions
+                            </th>
+                        {% endif %}
                     </tr>
                 </thead>
 

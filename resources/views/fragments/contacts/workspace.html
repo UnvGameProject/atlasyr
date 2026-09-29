@@ -2,12 +2,14 @@
     id="contacts-workspace"
     class="row g-4"
 >
-    <section class="col-lg-5">
-        {% include "fragments/contacts/create_form.html" %}
-    </section>
+    {% if can_create %}
+        <section class="col-lg-5">
+            {% include "fragments/contacts/create_form.html" %}
+        </section>
+    {% endif %}
 
     <section
-        class="col-lg-7"
+        class="{% if can_create %}col-lg-7{% else %}col-12{% endif %}"
         aria-labelledby="contacts-list-heading"
     >
         <div

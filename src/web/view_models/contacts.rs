@@ -1,5 +1,22 @@
 use serde::Serialize;
 
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+pub(in crate::web) struct ContactsPresentationAccess {
+    can_create: bool,
+    can_update: bool,
+    can_delete: bool,
+}
+
+impl ContactsPresentationAccess {
+    pub(in crate::web) fn new(can_create: bool, can_update: bool, can_delete: bool) -> Self {
+        Self {
+            can_create,
+            can_update,
+            can_delete,
+        }
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub(in crate::web) struct ContactsIndexView {
     app_css_url: String,
@@ -31,24 +48,41 @@ impl ContactsIndexView {
 
 #[derive(Debug, Serialize)]
 pub(in crate::web) struct ContactsWorkspaceView {
+    #[serde(flatten)]
+    access: ContactsPresentationAccess,
+
     form: ContactCreateFormView,
     contacts: Vec<ContactRowView>,
 }
 
 impl ContactsWorkspaceView {
-    pub(in crate::web) fn new(form: ContactCreateFormView, contacts: Vec<ContactRowView>) -> Self {
-        Self { form, contacts }
+    pub(in crate::web) fn new(
+        access: ContactsPresentationAccess,
+        form: ContactCreateFormView,
+        contacts: Vec<ContactRowView>,
+    ) -> Self {
+        Self {
+            access,
+            form,
+            contacts,
+        }
     }
 }
 
 #[derive(Debug, Serialize)]
 pub(in crate::web) struct ContactsListView {
+    #[serde(flatten)]
+    access: ContactsPresentationAccess,
+
     contacts: Vec<ContactRowView>,
 }
 
 impl ContactsListView {
-    pub(in crate::web) fn new(contacts: Vec<ContactRowView>) -> Self {
-        Self { contacts }
+    pub(in crate::web) fn new(
+        access: ContactsPresentationAccess,
+        contacts: Vec<ContactRowView>,
+    ) -> Self {
+        Self { access, contacts }
     }
 }
 
@@ -207,12 +241,15 @@ impl ContactRowView {
 
 #[derive(Debug, Serialize)]
 pub(in crate::web) struct ContactRowFragmentView {
+    #[serde(flatten)]
+    access: ContactsPresentationAccess,
+
     row: ContactRowView,
 }
 
 impl ContactRowFragmentView {
-    pub(in crate::web) fn new(row: ContactRowView) -> Self {
-        Self { row }
+    pub(in crate::web) fn new(access: ContactsPresentationAccess, row: ContactRowView) -> Self {
+        Self { access, row }
     }
 }
 
@@ -222,5 +259,120 @@ pub(in crate::web) struct ContactDeletedView {}
 impl ContactDeletedView {
     pub(in crate::web) fn new() -> Self {
         Self {}
+    }
+}
+
+#[cfg(test)]
+mod presentation_tests {
+    use std::path::Path;
+
+    use minijinja::{Environment, UndefinedBehavior, path_loader};
+
+    use super::{
+        ContactCreateFormView, ContactRowView, ContactsPresentationAccess, ContactsWorkspaceView,
+    };
+
+    fn render_workspace(access: ContactsPresentationAccess) -> String {
+        let mut environment = Environment::new();
+
+        environment.set_loader(path_loader(Path::new("resources/views")));
+
+        environment.set_undefined_behavior(UndefinedBehavior::Strict);
+
+        let workspace = ContactsWorkspaceView::new(
+            access,
+            ContactCreateFormView::empty(),
+            vec![ContactRowView::display(
+                "00000000-0000-0000-0000-000000000001".to_owned(),
+                "Ada Lovelace".to_owned(),
+                "ada@example.com".to_owned(),
+            )],
+        );
+
+        environment
+            .get_template("fragments/contacts/workspace.html")
+            .expect("Contacts workspace template should compile")
+            .render(&workspace)
+            .expect("Contacts workspace should render")
+    }
+
+    #[test]
+    fn viewer_workspace_omits_mutation_controls() {
+        let rendered = render_workspace(ContactsPresentationAccess::new(false, false, false));
+
+        assert!(
+            !rendered.contains("action=\"/contacts/create\""),
+            "viewer received create form: {rendered}",
+        );
+
+        assert!(
+            !rendered.contains("action=\"/contacts/update\""),
+            "viewer received update form: {rendered}",
+        );
+
+        assert!(
+            !rendered.contains("action=\"/contacts/delete\""),
+            "viewer received delete form: {rendered}",
+        );
+
+        assert!(
+            !rendered.contains("Edit contact"),
+            "viewer received edit control: {rendered}",
+        );
+
+        assert!(
+            !rendered.contains("Delete contact"),
+            "viewer received delete control: {rendered}",
+        );
+
+        assert!(
+            !rendered.contains("Actions"),
+            "viewer received actions heading: {rendered}",
+        );
+
+        assert!(
+            rendered.contains("Ada Lovelace"),
+            "viewer lost readable contact content",
+        );
+
+        assert!(
+            rendered.contains("Refresh contacts"),
+            "viewer lost read/refresh UX",
+        );
+    }
+
+    #[test]
+    fn operator_workspace_renders_mutation_controls() {
+        let rendered = render_workspace(ContactsPresentationAccess::new(true, true, true));
+
+        assert!(
+            rendered.contains("action=\"/contacts/create\""),
+            "operator create form missing: {rendered}",
+        );
+
+        assert!(
+            rendered.contains("action=\"/contacts/update\""),
+            "operator update form missing: {rendered}",
+        );
+
+        assert!(
+            rendered.contains("action=\"/contacts/delete\""),
+            "operator delete form missing: {rendered}",
+        );
+
+        assert!(
+            rendered.contains("Edit contact"),
+            "operator edit control missing: {rendered}",
+        );
+
+        assert!(
+            rendered.contains("Delete contact"),
+            "operator delete control missing: {rendered}",
+        );
+
+        assert!(
+            rendered.contains("Actions"),
+            "operator actions heading missing: {rendered}",
+        );
     }
 }

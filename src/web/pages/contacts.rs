@@ -25,7 +25,7 @@ use crate::web::{
     ViewRenderer,
     assets::{APP_CSS, BOOTSTRAP_JS, HTMX_JS, PLAIN_CSS},
     controllers,
-    view_models::{ContactDeletedView, ContactRowFragmentView},
+    view_models::{ContactDeletedView, ContactRowFragmentView, ContactsPresentationAccess},
     views::{CONTACTS_DELETED, CONTACTS_INDEX, CONTACTS_LIST, CONTACTS_ROW, CONTACTS_WORKSPACE},
 };
 
@@ -71,14 +71,27 @@ async fn require_authorization_actor(cx: &Cx, pool: &PgPool) -> Result<Authoriza
         .ok_or_unauthorized()?)
 }
 
+/// Project application authorization into rendering hints only.
+///
+/// These booleans improve UX but authorize nothing. Every operation remains
+/// independently protected by the opaque application grants from POC 4C.
+fn contacts_presentation_access(actor: AuthorizationActor) -> ContactsPresentationAccess {
+    ContactsPresentationAccess::new(
+        actor.contacts_create().is_some(),
+        actor.contacts_update().is_some(),
+        actor.contacts_delete().is_some(),
+    )
+}
+
 #[page("/contacts/list")]
 async fn contacts_list_html(cx: &Cx) -> Result<impl View> {
     let pool = app_context::<PgPool>(cx);
 
     let actor = require_authorization_actor(cx, pool).await?;
+    let presentation_access = contacts_presentation_access(actor);
     let read_access: ContactsReadGrant = actor.contacts_read().ok_or_forbidden()?;
 
-    let model = controllers::contacts::list(pool, read_access).await?;
+    let model = controllers::contacts::list(pool, read_access, presentation_access).await?;
 
     let renderer = app_context::<ViewRenderer>(cx);
 
@@ -92,6 +105,7 @@ async fn contacts_row_html(cx: &Cx) -> Result<impl View> {
     let pool = app_context::<PgPool>(cx);
 
     let actor = require_authorization_actor(cx, pool).await?;
+    let presentation_access = contacts_presentation_access(actor);
     let read_access: ContactsReadGrant = actor.contacts_read().ok_or_forbidden()?;
 
     let id: &str = topcoat::router::path_param::<ContactId>(cx);
@@ -100,7 +114,7 @@ async fn contacts_row_html(cx: &Cx) -> Result<impl View> {
 
     let renderer = app_context::<ViewRenderer>(cx);
 
-    let model = ContactRowFragmentView::new(row);
+    let model = ContactRowFragmentView::new(presentation_access, row);
 
     let rendered = renderer.render(CONTACTS_ROW, &model)?;
 
@@ -112,14 +126,21 @@ async fn contacts_create_html(cx: &Cx, Form(input): Form<ContactCreateForm>) -> 
     let pool = app_context::<PgPool>(cx);
 
     let actor = require_authorization_actor(cx, pool).await?;
+    let presentation_access = contacts_presentation_access(actor);
 
     let create_access: ContactsCreateGrant = actor.contacts_create().ok_or_forbidden()?;
 
     let read_access: ContactsReadGrant = actor.contacts_read().ok_or_forbidden()?;
 
-    let result =
-        controllers::contacts::create(pool, create_access, read_access, input.name, input.email)
-            .await?;
+    let result = controllers::contacts::create(
+        pool,
+        create_access,
+        read_access,
+        presentation_access,
+        input.name,
+        input.email,
+    )
+    .await?;
 
     let renderer = app_context::<ViewRenderer>(cx);
 
@@ -155,6 +176,7 @@ async fn contacts_update_html(cx: &Cx, Form(input): Form<ContactUpdateForm>) -> 
     let pool = app_context::<PgPool>(cx);
 
     let actor = require_authorization_actor(cx, pool).await?;
+    let presentation_access = contacts_presentation_access(actor);
 
     let update_access: ContactsUpdateGrant = actor.contacts_update().ok_or_forbidden()?;
 
@@ -173,7 +195,7 @@ async fn contacts_update_html(cx: &Cx, Form(input): Form<ContactUpdateForm>) -> 
     let renderer = app_context::<ViewRenderer>(cx);
 
     if hx_request(cx) {
-        let model = ContactRowFragmentView::new(result.into_row());
+        let model = ContactRowFragmentView::new(presentation_access, result.into_row());
 
         let rendered = renderer.render(CONTACTS_ROW, &model)?;
 
@@ -186,7 +208,9 @@ async fn contacts_update_html(cx: &Cx, Form(input): Form<ContactUpdateForm>) -> 
 
     let row = result.into_row();
 
-    let workspace = controllers::contacts::workspace_with_row(pool, read_access, row).await?;
+    let workspace =
+        controllers::contacts::workspace_with_row(pool, read_access, presentation_access, row)
+            .await?;
 
     let assets = asset_config(cx);
 
@@ -208,6 +232,7 @@ async fn contacts_delete_html(cx: &Cx, Form(input): Form<ContactDeleteForm>) -> 
     let pool = app_context::<PgPool>(cx);
 
     let actor = require_authorization_actor(cx, pool).await?;
+    let presentation_access = contacts_presentation_access(actor);
 
     let delete_access: ContactsDeleteGrant = actor.contacts_delete().ok_or_forbidden()?;
 
@@ -225,9 +250,10 @@ async fn contacts_delete_html(cx: &Cx, Form(input): Form<ContactDeleteForm>) -> 
                 renderer.render(CONTACTS_DELETED, &ContactDeletedView::new())?
             }
 
-            controllers::contacts::ContactDeleteResult::Row(row) => {
-                renderer.render(CONTACTS_ROW, &ContactRowFragmentView::new(row))?
-            }
+            controllers::contacts::ContactDeleteResult::Row(row) => renderer.render(
+                CONTACTS_ROW,
+                &ContactRowFragmentView::new(presentation_access, row),
+            )?,
         };
 
         return Ok(rendered.into_view(cx));
@@ -241,7 +267,9 @@ async fn contacts_delete_html(cx: &Cx, Form(input): Form<ContactDeleteForm>) -> 
         controllers::contacts::ContactDeleteResult::Row(row) => row,
     };
 
-    let workspace = controllers::contacts::workspace_with_row(pool, read_access, row).await?;
+    let workspace =
+        controllers::contacts::workspace_with_row(pool, read_access, presentation_access, row)
+            .await?;
 
     let assets = asset_config(cx);
 
@@ -263,6 +291,7 @@ async fn contacts_html(cx: &Cx) -> Result<impl View> {
     let pool = app_context::<PgPool>(cx);
 
     let actor = require_authorization_actor(cx, pool).await?;
+    let presentation_access = contacts_presentation_access(actor);
     let read_access: ContactsReadGrant = actor.contacts_read().ok_or_forbidden()?;
 
     let assets = asset_config(cx);
@@ -270,6 +299,7 @@ async fn contacts_html(cx: &Cx) -> Result<impl View> {
     let model = controllers::contacts::index(
         pool,
         read_access,
+        presentation_access,
         assets.resolve(APP_CSS),
         assets.resolve(PLAIN_CSS),
         assets.resolve(BOOTSTRAP_JS),
