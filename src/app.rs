@@ -13,7 +13,7 @@ use crate::{
     auth::AuthManager,
     config::{AppEnvironment, AuthConfig, DatabaseConfig},
     db,
-    web::ViewRenderer,
+    web::{ViewRenderer, security_headers::SecurityHeaders},
 };
 
 pub(crate) async fn run() -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -59,6 +59,9 @@ fn router_builder(database: PgPool, auth: AuthManager, views: ViewRenderer) -> R
         .origin_policy(OriginPolicy::new())
         .cookies()
         .sessions(session_config)
+        // Application response security policy must wrap the Topcoat
+        // runtime as well as discovered application routes.
+        .layer(SecurityHeaders)
         .runtime()
         .discover()
         .app_context(database)
@@ -76,7 +79,7 @@ mod tests {
         config::{AppEnvironment, AuthConfig},
         db::models::contact::Contact,
         domain::contact::CreateContactInput,
-        web::ViewRenderer,
+        web::{ViewRenderer, security_headers::SecurityHeaders},
     };
 
     use super::router_builder;
@@ -181,6 +184,97 @@ mod tests {
             403,
             "authenticated viewer mutation must be forbidden at {uri}",
         );
+    }
+
+    fn assert_security_headers(response: &Response) {
+        let headers = response.headers();
+
+        for (name, expected) in [
+            (
+                "content-security-policy",
+                SecurityHeaders::CONTENT_SECURITY_POLICY,
+            ),
+            (
+                "x-content-type-options",
+                SecurityHeaders::X_CONTENT_TYPE_OPTIONS,
+            ),
+            ("x-frame-options", SecurityHeaders::X_FRAME_OPTIONS),
+            ("referrer-policy", SecurityHeaders::REFERRER_POLICY),
+            ("permissions-policy", SecurityHeaders::PERMISSIONS_POLICY),
+        ] {
+            let values: Vec<_> = headers.get_all(name).iter().collect();
+
+            assert_eq!(
+                values.len(),
+                1,
+                "security header must be emitted exactly once: {name}",
+            );
+
+            assert_eq!(
+                values[0]
+                    .to_str()
+                    .expect("security header must be valid ASCII"),
+                expected,
+                "security header value mismatch: {name}",
+            );
+        }
+
+        assert!(
+            headers.get("strict-transport-security").is_none(),
+            "HSTS must remain at the verified HTTPS deployment boundary",
+        );
+    }
+
+    #[sqlx::test]
+    async fn security_headers_cover_success_and_router_errors(pool: sqlx::PgPool) {
+        let auth = AuthManager::from_config(&AuthConfig::local_topcoat_for_test());
+
+        let views = ViewRenderer::new(AppEnvironment::Testing)
+            .expect("testing view renderer should initialize");
+
+        let router = router_builder(pool, auth, views).build();
+
+        let success = router
+            .handle(request("GET", "/view-dx/demo", None, None, Body::from("")))
+            .await;
+
+        assert_eq!(
+            success.status().as_u16(),
+            200,
+            "public fragment should remain reachable",
+        );
+
+        assert_security_headers(&success);
+
+        let unauthorized = router
+            .handle(request("GET", "/contacts/list", None, None, Body::from("")))
+            .await;
+
+        assert_eq!(
+            unauthorized.status().as_u16(),
+            401,
+            "protected route should remain unauthorized without a session",
+        );
+
+        assert_security_headers(&unauthorized);
+
+        let missing = router
+            .handle(request(
+                "GET",
+                "/__security-header-proof-missing",
+                None,
+                None,
+                Body::from(""),
+            ))
+            .await;
+
+        assert_eq!(
+            missing.status().as_u16(),
+            404,
+            "unmatched route should remain not found",
+        );
+
+        assert_security_headers(&missing);
     }
 
     #[sqlx::test]

@@ -4,6 +4,7 @@ mod controllers;
 mod layouts;
 mod pages;
 mod procedures;
+pub(crate) mod security_headers;
 mod view_models;
 mod views;
 
