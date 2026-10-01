@@ -4,7 +4,7 @@ use sqlx::PgPool;
 use topcoat::{
     asset::{AssetBundle, RouterBuilderAssetExt},
     cookie::RouterBuilderCookieExt,
-    router::{OriginPolicy, Router, RouterBuilder, RouterBuilderDiscoverExt},
+    router::{BodyLimit, OriginPolicy, Router, RouterBuilder, RouterBuilderDiscoverExt},
     runtime::RouterBuilderRuntimeExt,
     session::RouterBuilderSessionExt,
 };
@@ -15,6 +15,12 @@ use crate::{
     db,
     web::{ViewRenderer, security_headers::SecurityHeaders},
 };
+
+// Current application request bodies are small HTML forms and runtime
+// procedure payloads. Keep their buffering ceiling explicit and conservative.
+// A future upload/import route must opt into a larger scoped BodyLimit rather
+// than silently widening this application-wide boundary.
+const REQUEST_BODY_LIMIT_BYTES: usize = 64 * 1024;
 
 pub(crate) async fn run() -> Result<(), Box<dyn Error + Send + Sync>> {
     let app_environment = AppEnvironment::load()?;
@@ -59,6 +65,9 @@ fn router_builder(database: PgPool, auth: AuthManager, views: ViewRenderer) -> R
         .origin_policy(OriginPolicy::new())
         .cookies()
         .sessions(session_config)
+        // Topcoat buffering extractors enforce this request-context limit and
+        // return 413 before oversized form/procedure bodies reach handlers.
+        .layer(BodyLimit::max(REQUEST_BODY_LIMIT_BYTES))
         // Application response security policy must wrap the Topcoat
         // runtime as well as discovered application routes.
         .layer(SecurityHeaders)
@@ -82,7 +91,7 @@ mod tests {
         web::{ViewRenderer, security_headers::SecurityHeaders},
     };
 
-    use super::router_builder;
+    use super::{REQUEST_BODY_LIMIT_BYTES, router_builder};
 
     const VIEWER_EMAIL: &str = "viewer-http-proof@example.com";
 
@@ -223,6 +232,49 @@ mod tests {
             headers.get("strict-transport-security").is_none(),
             "HSTS must remain at the verified HTTPS deployment boundary",
         );
+    }
+
+    #[sqlx::test]
+    async fn oversized_buffered_requests_are_rejected_before_handlers(pool: sqlx::PgPool) {
+        let auth = AuthManager::from_config(&AuthConfig::local_topcoat_for_test());
+
+        let views = ViewRenderer::new(AppEnvironment::Testing)
+            .expect("testing view renderer should initialize");
+
+        let router = router_builder(pool, auth, views).build();
+
+        // Exercise both buffering transports used by the application:
+        //
+        // - a Topcoat runtime procedure accepting JSON arguments;
+        // - an HTML-first contact endpoint using Form<T>.
+        //
+        // The payload is intentionally malformed for either transport after
+        // its first bytes. Size enforcement must win before deserialization,
+        // validation, authentication work, or application handler behavior.
+        for (uri, content_type) in [
+            ("/auth/login", "application/json"),
+            ("/contacts/create", "application/x-www-form-urlencoded"),
+        ] {
+            let response = router
+                .handle(request(
+                    "POST",
+                    uri,
+                    None,
+                    Some(content_type),
+                    Body::from(vec![b'x'; REQUEST_BODY_LIMIT_BYTES + 1]),
+                ))
+                .await;
+
+            assert_eq!(
+                response.status().as_u16(),
+                413,
+                "oversized buffered request must be rejected at {uri}",
+            );
+
+            // The response-security layer remains the outer application
+            // boundary even when body extraction fails before the handler.
+            assert_security_headers(&response);
+        }
     }
 
     #[sqlx::test]
