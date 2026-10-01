@@ -4,7 +4,7 @@ use sqlx::PgPool;
 use topcoat::{
     asset::{AssetBundle, RouterBuilderAssetExt},
     cookie::RouterBuilderCookieExt,
-    router::{Router, RouterBuilder, RouterBuilderDiscoverExt},
+    router::{OriginPolicy, Router, RouterBuilder, RouterBuilderDiscoverExt},
     runtime::RouterBuilderRuntimeExt,
     session::RouterBuilderSessionExt,
 };
@@ -53,6 +53,10 @@ fn router_builder(database: PgPool, auth: AuthManager, views: ViewRenderer) -> R
     let session_config = auth.session_config();
 
     Router::builder()
+        // Cookie-authenticated browser mutations must remain same-origin.
+        // Keep Topcoat's strict policy explicit: no trusted cross-origin
+        // peers and no exempt routes.
+        .origin_policy(OriginPolicy::new())
         .cookies()
         .sessions(session_config)
         .runtime()
@@ -103,6 +107,18 @@ mod tests {
         }
 
         builder.body(body).expect("test request should build")
+    }
+
+    fn cross_origin_browser_post(uri: &str, content_type: &str, body: Body) -> Request {
+        Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header("host", "example.test")
+            .header("origin", "https://attacker.example")
+            .header("sec-fetch-site", "cross-site")
+            .header("content-type", content_type)
+            .body(body)
+            .expect("cross-origin test request should build")
     }
 
     async fn body_text(response: Response) -> String {
@@ -165,6 +181,38 @@ mod tests {
             403,
             "authenticated viewer mutation must be forbidden at {uri}",
         );
+    }
+
+    #[sqlx::test]
+    async fn cross_origin_browser_state_changes_are_rejected_before_handlers(pool: sqlx::PgPool) {
+        let auth = AuthManager::from_config(&AuthConfig::local_topcoat_for_test());
+
+        let views = ViewRenderer::new(AppEnvironment::Testing)
+            .expect("testing view renderer should initialize");
+
+        let router = router_builder(pool, auth, views).build();
+
+        for (uri, content_type) in [
+            ("/auth/login", "application/json"),
+            ("/auth/logout", "application/json"),
+            ("/contacts/create", "application/x-www-form-urlencoded"),
+            ("/contacts/update", "application/x-www-form-urlencoded"),
+            ("/contacts/delete", "application/x-www-form-urlencoded"),
+        ] {
+            let response = router
+                .handle(cross_origin_browser_post(
+                    uri,
+                    content_type,
+                    Body::from("body-must-not-reach-handler"),
+                ))
+                .await;
+
+            assert_eq!(
+                response.status().as_u16(),
+                403,
+                "cross-origin browser mutation must be rejected before handler execution: {uri}",
+            );
+        }
     }
 
     #[sqlx::test]
