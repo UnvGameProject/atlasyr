@@ -1006,6 +1006,85 @@ such a route: it can stream fields and applies the request's effective
 replace the application-level filename, content-validation, authorization,
 storage, and lifecycle rules above.
 
+## Rate-limiting policy
+
+No blanket application-wide request limiter is enabled.
+
+Rate limiting is applied where the protected resource, abuse model, and
+identity key are known well enough to define a meaningful quota. A generic
+global requests-per-minute limit would conflate unrelated operations, create
+unnecessary contention for normal authenticated use, and can penalize many
+users behind the same NAT or proxy.
+
+The current authentication throttle remains a separate credential-defense
+boundary:
+
+- each normalized account identifier receives 5 login attempts per minute;
+- each resolved client IP receives 30 login attempts per minute;
+- the client-IP budget is consumed before arbitrary account keys can be
+  created;
+- missing client IP uses the existing shared fail-safe budget;
+- oversized account identifiers share the bounded invalid-identifier key; and
+- throttling occurs before database credential lookup and Argon2 verification.
+
+That login throttle must not be replaced by a generic router-wide limiter.
+Its account-plus-client model protects an unusually expensive anonymous
+operation and deliberately avoids revealing whether an account exists.
+
+Ordinary authenticated contact reads and CRUD mutations do not currently have
+an additional application quota. They are already subject to authentication,
+authorization, origin enforcement, request-size limits, and the normal
+database/application boundaries. A future route-specific limiter should be
+added only when a concrete resource-cost, abuse, automation, or business-rule
+requirement justifies one.
+
+When an application-facing route quota is required:
+
+- prefer a stable authenticated user identifier as the primary key for
+  authenticated operations instead of relying solely on IP address;
+- use client IP only when it is relevant to the abuse model and the
+  deployment's trusted-proxy configuration is explicit and verified;
+- keep different resource classes in separate budgets rather than sharing one
+  global counter;
+- return Topcoat's typed HTTP 429 response with an appropriate `Retry-After`
+  value rather than silently delaying requests;
+- add a typed `RequestRateLimited` security event at the same time the first
+  application-facing 429 quota is introduced;
+- ensure rejected requests do not execute the expensive or state-changing
+  operation they are intended to protect;
+- bound attacker-controlled limiter keys and periodically discard stale keyed
+  state where an in-process keyed limiter is used;
+- test the allowed boundary, first rejected request, recovery after the
+  window, key isolation, missing-key behavior, and response headers; and
+- document whether the limiter is process-local, shared, or enforced at the
+  edge.
+
+Tower's generic `RateLimit` middleware is not the application quota primitive
+for this baseline. Its service-readiness behavior applies backpressure by
+waiting for capacity; it does not represent the explicit 429 rejection
+semantics required for a caller-visible application quota. Tower concurrency
+or rate controls may still be useful later as internal capacity/backpressure
+tools where that behavior is intentional.
+
+Client-IP policy is deployment-sensitive. Topcoat trusts no reverse proxies by
+default and therefore uses the direct peer address until `TrustedProxies` is
+configured. Production must not broaden IP-based security decisions merely by
+trusting forwarded headers. The reverse-proxy/TLS architecture must define
+which proxy networks or hops are trusted before forwarded client addresses are
+used for broader application or edge rate limiting.
+
+Process-local keyed limiters also do not constitute a globally authoritative
+quota across multiple application replicas. Instance-local defensive limits
+may use them where that scope is acceptable; globally consistent abuse,
+billing, or business quotas require a shared enforcement point or a deliberate
+edge/shared-store design.
+
+Anonymous/global traffic shaping and volumetric abuse protection belong
+primarily at the production ingress/reverse-proxy boundary, where connection
+identity, deployment topology, and aggregate traffic are visible. That
+infrastructure policy will be finalized with POC 6 rather than approximated
+inside the application before the proxy contract exists.
+
 ## Authentication and session baseline
 
 The current authentication architecture deliberately separates application credential policy from the underlying Topcoat session transport.
@@ -1629,7 +1708,7 @@ Still to evaluate or complete as application-wide policy:
 - security headers
 - request-size limits
 - file-upload policy: unsupported by default; any future upload/import route must follow the explicit security contract above
-- broader rate-limiting policy
+- broader rate-limiting policy: no blanket application limiter; specialized and route-specific quotas follow the explicit policy above
 - production error handling
 - application audit logging
 
