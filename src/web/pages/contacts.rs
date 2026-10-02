@@ -15,7 +15,7 @@ use topcoat::{
     htmx::hx_request,
     router::{
         content::Form,
-        error::{RouterErrorExt, see_other},
+        error::{RouterErrorExt, internal_server_error, see_other},
         page,
     },
     view::View,
@@ -51,8 +51,9 @@ struct ContactUpdateForm {
 struct ContactDeleteForm {
     id: String,
 
-    // Presentation-only snapshots used only to render a generic
-    // persistence failure. DeleteContactCommand remains ID-only.
+    // Legacy presentation snapshots remain in the submitted form contract for
+    // this slice but never enter DeleteContactCommand or internal-error
+    // reporting. A later form cleanup may remove them independently.
     name: String,
     email: String,
 }
@@ -66,9 +67,11 @@ struct ContactDeleteForm {
 async fn require_authorization_actor(cx: &Cx, pool: &PgPool) -> Result<AuthorizationActor> {
     let identity = require_auth(cx).await?;
 
-    Ok(load_authorization_actor(pool, identity.user_id())
-        .await?
-        .ok_or_unauthorized()?)
+    let actor = load_authorization_actor(pool, identity.user_id())
+        .await
+        .map_err(internal_server_error)?;
+
+    Ok(actor.ok_or_unauthorized()?)
 }
 
 /// Project application authorization into rendering hints only.
@@ -91,7 +94,9 @@ async fn contacts_list_html(cx: &Cx) -> Result<impl View> {
     let presentation_access = contacts_presentation_access(actor);
     let read_access: ContactsReadGrant = actor.contacts_read().ok_or_forbidden()?;
 
-    let model = controllers::contacts::list(pool, read_access, presentation_access).await?;
+    let model = controllers::contacts::list(pool, read_access, presentation_access)
+        .await
+        .map_err(internal_server_error)?;
 
     let renderer = app_context::<ViewRenderer>(cx);
 
@@ -110,7 +115,9 @@ async fn contacts_row_html(cx: &Cx) -> Result<impl View> {
 
     let id: &str = topcoat::router::path_param::<ContactId>(cx);
 
-    let row = controllers::contacts::row(pool, read_access, id).await?;
+    let row = controllers::contacts::row(pool, read_access, id)
+        .await
+        .map_err(internal_server_error)?;
 
     let renderer = app_context::<ViewRenderer>(cx);
 
@@ -140,7 +147,8 @@ async fn contacts_create_html(cx: &Cx, Form(input): Form<ContactCreateForm>) -> 
         input.name,
         input.email,
     )
-    .await?;
+    .await
+    .map_err(internal_server_error)?;
 
     let renderer = app_context::<ViewRenderer>(cx);
 
@@ -190,7 +198,8 @@ async fn contacts_update_html(cx: &Cx, Form(input): Form<ContactUpdateForm>) -> 
         input.name,
         input.email,
     )
-    .await?;
+    .await
+    .map_err(internal_server_error)?;
 
     let renderer = app_context::<ViewRenderer>(cx);
 
@@ -210,7 +219,8 @@ async fn contacts_update_html(cx: &Cx, Form(input): Form<ContactUpdateForm>) -> 
 
     let workspace =
         controllers::contacts::workspace_with_row(pool, read_access, presentation_access, row)
-            .await?;
+            .await
+            .map_err(internal_server_error)?;
 
     let assets = asset_config(cx);
 
@@ -240,7 +250,8 @@ async fn contacts_delete_html(cx: &Cx, Form(input): Form<ContactDeleteForm>) -> 
 
     let result =
         controllers::contacts::delete(pool, delete_access, input.id, input.name, input.email)
-            .await?;
+            .await
+            .map_err(internal_server_error)?;
 
     let renderer = app_context::<ViewRenderer>(cx);
 
@@ -269,7 +280,8 @@ async fn contacts_delete_html(cx: &Cx, Form(input): Form<ContactDeleteForm>) -> 
 
     let workspace =
         controllers::contacts::workspace_with_row(pool, read_access, presentation_access, row)
-            .await?;
+            .await
+            .map_err(internal_server_error)?;
 
     let assets = asset_config(cx);
 
@@ -305,7 +317,8 @@ async fn contacts_html(cx: &Cx) -> Result<impl View> {
         assets.resolve(BOOTSTRAP_JS),
         assets.resolve(HTMX_JS),
     )
-    .await?;
+    .await
+    .map_err(internal_server_error)?;
 
     let renderer = app_context::<ViewRenderer>(cx);
 

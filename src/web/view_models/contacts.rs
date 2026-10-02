@@ -201,20 +201,6 @@ impl ContactRowView {
         self
     }
 
-    pub(in crate::web) fn delete_failed(mut self, message: &'static str) -> Self {
-        self.edit_open = false;
-        self.delete_open = true;
-        self.success_message = None;
-        self.validation_message = None;
-        self.error_message = None;
-        self.delete_error_message = Some(message);
-        self.name_error = None;
-        self.email_error = None;
-        self.unavailable_message = None;
-
-        self
-    }
-
     pub(in crate::web) fn unavailable(id: String, message: &'static str) -> Self {
         Self {
             id,

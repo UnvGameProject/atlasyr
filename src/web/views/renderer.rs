@@ -75,11 +75,12 @@ impl ViewRenderer {
             Err(error) => {
                 log_view_error("render", self.app_environment, name, &error);
 
-                // Topcoat converts an unrecognized handler error into its
-                // generic internal-server-error response. The MiniJinja
-                // diagnostic remains server-side and is never rendered into
-                // the customer response.
-                Err(error.into())
+                // Keep the MiniJinja diagnostic server-side and cross the
+                // HTTP boundary as Topcoat's explicit InternalServerError.
+                // That preserves the generic client response while allowing
+                // the application security-event layer to classify the 500
+                // without inspecting or recording the underlying error.
+                Err(topcoat::router::error::internal_server_error(error).into())
             }
         }
     }

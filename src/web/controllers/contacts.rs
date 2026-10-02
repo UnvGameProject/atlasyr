@@ -25,10 +25,6 @@ const UPDATED_MESSAGE: &str = "Contact updated.";
 
 const VALIDATION_MESSAGE: &str = "Please correct the highlighted fields.";
 
-const CREATE_ERROR_MESSAGE: &str = "The contact could not be created.";
-
-const UPDATE_ERROR_MESSAGE: &str = "The contact could not be updated.";
-
 const NOT_FOUND_MESSAGE: &str = "This contact is no longer available.";
 
 const NAME_ERROR: &str = "Name is required and must be 200 characters or fewer.";
@@ -36,8 +32,6 @@ const NAME_ERROR: &str = "Name is required and must be 200 characters or fewer."
 const EMAIL_ERROR: &str = "Enter a valid email address no longer than 320 characters.";
 
 const DUPLICATE_EMAIL_ERROR: &str = "A contact with this email address already exists.";
-
-const DELETE_ERROR_MESSAGE: &str = "The contact could not be deleted.";
 
 #[derive(Debug, PartialEq, Eq)]
 pub(in crate::web) enum ContactDeleteResult {
@@ -158,30 +152,13 @@ pub(in crate::web) async fn create(
 ) -> Result<ContactCreateResult, ContactError> {
     let command = CreateContactCommand::new(name.clone(), email.clone());
 
-    let (form, succeeded) = match create_contact_use_case(pool, create_access, command).await {
-        Ok(outcome) => {
-            let succeeded = matches!(&outcome, CreateContactOutcome::Created);
-
-            (create_form_for_outcome(name, email, outcome), succeeded)
-        }
-
-        Err(error) => {
-            eprintln!("contact creation failed: {error:?}");
-
-            (
-                ContactCreateFormView::new(
-                    name,
-                    email,
-                    None,
-                    None,
-                    Some(CREATE_ERROR_MESSAGE),
-                    None,
-                    None,
-                ),
-                false,
-            )
-        }
-    };
+    // Validation and duplicate-email conditions are typed application
+    // outcomes. Any remaining Err is an infrastructure/internal failure and
+    // must propagate to the HTTP adapter rather than masquerade as a normal
+    // rendered form response.
+    let outcome = create_contact_use_case(pool, create_access, command).await?;
+    let succeeded = matches!(&outcome, CreateContactOutcome::Created);
+    let form = create_form_for_outcome(name, email, outcome);
 
     let workspace = workspace(pool, read_access, presentation_access, form).await?;
 
@@ -202,21 +179,10 @@ pub(in crate::web) async fn update(
 ) -> Result<ContactUpdateResult, ContactError> {
     let command = UpdateContactCommand::new(id.clone(), name.clone(), email.clone());
 
-    let outcome = match update_contact_use_case(pool, update_access, command).await {
-        Ok(outcome) => outcome,
-
-        Err(error) => {
-            eprintln!("contact update failed: {error:?}");
-
-            let current = current_contact_row(pool, read_access, &id).await?;
-
-            let row = current
-                .map(|row| row.editing(name, email, None, Some(UPDATE_ERROR_MESSAGE), None, None))
-                .unwrap_or_else(|| ContactRowView::unavailable(id, NOT_FOUND_MESSAGE));
-
-            return Ok(ContactUpdateResult::Render(row));
-        }
-    };
+    // Expected validation, duplicate-email, and not-found states are encoded
+    // in UpdateContactOutcome. Unexpected storage failures remain errors so
+    // the HTTP boundary can return a real sanitized 500.
+    let outcome = update_contact_use_case(pool, update_access, command).await?;
 
     let succeeded = matches!(&outcome, UpdateContactOutcome::Updated { .. });
 
@@ -239,22 +205,17 @@ pub(in crate::web) async fn delete(
     pool: &PgPool,
     delete_access: ContactsDeleteGrant,
     id: String,
-    name: String,
-    email: String,
+    _name: String,
+    _email: String,
 ) -> Result<ContactDeleteResult, ContactError> {
     let command = DeleteContactCommand::new(id.clone());
 
-    match delete_contact_use_case(pool, delete_access, command).await {
-        Ok(outcome) => Ok(delete_result_for_outcome(id, outcome)),
+    // Not-found is a typed DeleteContactOutcome. Any remaining error is an
+    // internal persistence failure and must not be converted into a normal
+    // row response.
+    let outcome = delete_contact_use_case(pool, delete_access, command).await?;
 
-        Err(error) => {
-            eprintln!("contact deletion failed: {error:?}");
-
-            Ok(ContactDeleteResult::Row(
-                ContactRowView::display(id, name, email).delete_failed(DELETE_ERROR_MESSAGE),
-            ))
-        }
-    }
+    Ok(delete_result_for_outcome(id, outcome))
 }
 
 pub(in crate::web) async fn workspace_with_row(

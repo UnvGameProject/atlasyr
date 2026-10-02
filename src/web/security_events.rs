@@ -7,7 +7,7 @@ use topcoat::{
     context::Cx,
     router::{
         Body, Layer, LayerFuture, Next, Path,
-        error::{ContentTooLargeError, ForbiddenError, UnauthorizedError},
+        error::{ContentTooLargeError, ForbiddenError, InternalServerError, UnauthorizedError},
         request::{client_ip, method},
         try_endpoint,
     },
@@ -32,6 +32,7 @@ pub(crate) enum SecurityEventKind {
     RequestUnauthorized,
     RequestForbidden,
     RequestBodyTooLarge,
+    RequestInternalError,
 }
 
 impl SecurityEventKind {
@@ -47,6 +48,7 @@ impl SecurityEventKind {
             Self::RequestUnauthorized => "request_unauthorized",
             Self::RequestForbidden => "request_forbidden",
             Self::RequestBodyTooLarge => "request_body_too_large",
+            Self::RequestInternalError => "request_internal_error",
         }
     }
 }
@@ -203,6 +205,8 @@ fn classify_router_error(error: &topcoat::Error) -> Option<SecurityEventKind> {
         Some(SecurityEventKind::RequestForbidden)
     } else if error.downcast_ref::<ContentTooLargeError>().is_some() {
         Some(SecurityEventKind::RequestBodyTooLarge)
+    } else if error.downcast_ref::<InternalServerError>().is_some() {
+        Some(SecurityEventKind::RequestInternalError)
     } else {
         None
     }
@@ -242,7 +246,9 @@ impl SecurityEventCapture {
 mod tests {
     use std::net::{IpAddr, Ipv4Addr};
 
-    use topcoat::router::error::{content_too_large, forbidden, unauthorized};
+    use topcoat::router::error::{
+        content_too_large, forbidden, internal_server_error, unauthorized,
+    };
     use uuid::Uuid;
 
     use super::{SecurityEvent, SecurityEventKind, classify_router_error};
@@ -252,6 +258,8 @@ mod tests {
         let unauthorized_error: topcoat::Error = unauthorized().into();
         let forbidden_error: topcoat::Error = forbidden().into();
         let too_large_error: topcoat::Error = content_too_large().into();
+        let internal_error: topcoat::Error =
+            internal_server_error(std::io::Error::other("do-not-log-internal-source")).into();
 
         assert_eq!(
             classify_router_error(&unauthorized_error),
@@ -266,6 +274,11 @@ mod tests {
         assert_eq!(
             classify_router_error(&too_large_error),
             Some(SecurityEventKind::RequestBodyTooLarge),
+        );
+
+        assert_eq!(
+            classify_router_error(&internal_error),
+            Some(SecurityEventKind::RequestInternalError),
         );
     }
 

@@ -364,6 +364,154 @@ mod tests {
     }
 
     #[sqlx::test]
+    async fn internal_storage_errors_are_sanitized_and_security_visible(pool: sqlx::PgPool) {
+        const QUERY_MARKER: &str = "internal-query-must-not-be-logged";
+        const DATABASE_DETAIL_MARKER: &str = "contacts";
+
+        // Authenticate through the real supported transport before damaging
+        // this isolated sqlx::test database. The resulting request therefore
+        // exercises the same session and authorization boundaries as a real
+        // authenticated browser request.
+        let outcome = create_user(
+            &pool,
+            CreateUserCommand::new(
+                VIEWER_EMAIL.to_owned(),
+                CreateUserRole::Viewer,
+                VIEWER_PASSWORD.to_owned(),
+            ),
+        )
+        .await
+        .expect("viewer provisioning should succeed");
+
+        assert!(
+            matches!(outcome, CreateUserOutcome::Created),
+            "viewer provisioning returned an unexpected outcome",
+        );
+
+        let auth = AuthManager::from_config(&AuthConfig::local_topcoat_for_test());
+
+        let views = ViewRenderer::new(AppEnvironment::Testing)
+            .expect("testing view renderer should initialize");
+
+        let (security_events, capture) = SecurityEventRecorder::capture();
+
+        let router =
+            router_builder_with_security_events(pool.clone(), auth, views, security_events).build();
+
+        let login_response = router
+            .handle(request(
+                "POST",
+                "/auth/login",
+                None,
+                Some("application/json"),
+                Body::from(format!("[\"{}\",\"{}\"]", VIEWER_EMAIL, VIEWER_PASSWORD,)),
+            ))
+            .await;
+
+        assert_eq!(
+            login_response.status().as_u16(),
+            200,
+            "test viewer should authenticate through the real login procedure",
+        );
+
+        let cookie = active_session_cookie(&login_response);
+
+        // Break only Contacts persistence after authentication. Users and
+        // persisted sessions remain available, so the request reaches the
+        // protected Contacts query and fails there with a real PostgreSQL /
+        // SQLx backend error.
+        sqlx::query("DROP TABLE contacts")
+            .execute(&pool)
+            .await
+            .expect("isolated test contacts table should be removable");
+
+        let response = router
+            .handle(request(
+                "GET",
+                &format!("/contacts/list?probe={QUERY_MARKER}"),
+                Some(&cookie),
+                None,
+                Body::empty(),
+            ))
+            .await;
+
+        assert_eq!(
+            response.status().as_u16(),
+            500,
+            "unexpected Contacts storage failure must be a real HTTP 500",
+        );
+
+        // Normal Result::Err 500s retain the request context, so the
+        // application response-security policy must still be applied.
+        assert_security_headers(&response);
+
+        let body = body_text(response).await;
+
+        assert_eq!(
+            body, "internal server error",
+            "client-facing 500 body must stay generic",
+        );
+
+        for forbidden in [
+            DATABASE_DETAIL_MARKER,
+            "sqlx",
+            "postgres",
+            "relation",
+            "contact storage operation failed",
+            VIEWER_EMAIL,
+            QUERY_MARKER,
+        ] {
+            assert!(
+                !body
+                    .to_ascii_lowercase()
+                    .contains(&forbidden.to_ascii_lowercase()),
+                "internal detail leaked into client 500 body: {body}",
+            );
+        }
+
+        let events = capture.snapshot();
+
+        let internal_events: Vec<_> = events
+            .iter()
+            .filter(|event| event.kind() == SecurityEventKind::RequestInternalError)
+            .collect();
+
+        assert_eq!(
+            internal_events.len(),
+            1,
+            "the backend failure should emit exactly one request-internal-error event",
+        );
+
+        let event = internal_events[0];
+
+        assert_eq!(event.method(), "GET");
+        assert_eq!(event.route(), Some("/contacts/list"));
+
+        let line = event.log_line();
+
+        assert!(
+            line.contains("kind=request_internal_error"),
+            "typed internal-error event missing kind: {line}",
+        );
+
+        for forbidden in [
+            QUERY_MARKER,
+            VIEWER_EMAIL,
+            "sqlx",
+            "postgres",
+            "relation",
+            "contact storage operation failed",
+        ] {
+            assert!(
+                !line
+                    .to_ascii_lowercase()
+                    .contains(&forbidden.to_ascii_lowercase()),
+                "security event leaked backend/request detail: {line}",
+            );
+        }
+    }
+
+    #[sqlx::test]
     async fn oversized_buffered_requests_are_rejected_before_handlers(pool: sqlx::PgPool) {
         let auth = AuthManager::from_config(&AuthConfig::local_topcoat_for_test());
 

@@ -1085,6 +1085,60 @@ identity, deployment topology, and aggregate traffic are visible. That
 infrastructure policy will be finalized with POC 6 rather than approximated
 inside the application before the proxy contract exists.
 
+## Production error-handling policy
+
+Expected user and business outcomes remain distinct from internal failures.
+
+Validation failures, duplicate-email conditions, not-found outcomes,
+authentication failures, authorization denials, request-size failures, and
+other intentional HTTP/control-flow conditions are represented through their
+typed application or Topcoat outcomes. They must not be converted into
+internal-server errors merely because they are unsuccessful operations.
+
+Unexpected application, persistence, authorization-storage, and rendering
+failures cross the HTTP boundary as Topcoat's typed `InternalServerError`.
+The browser receives only Topcoat's generic HTTP 500 response body:
+
+`internal server error`
+
+Database errors, SQL text, filesystem paths, template source, Rust debug
+representations, error source chains, credentials, session material, request
+bodies, query strings, and other backend diagnostics must not be copied into
+that client response.
+
+Unexpected Contacts persistence failures are not ordinary form or row states.
+They propagate through the application/controller boundary and are converted
+to the typed internal-server error only at the HTTP adapter. A database outage
+or corrupted persistence operation must therefore not appear to the browser as
+an ordinary successful HTTP response containing a validation-style message.
+
+The application security-event layer classifies typed internal-server errors
+as `RequestInternalError`. The event remains intentionally sanitized: it
+records only the stable event kind, HTTP method, matched route pattern,
+resolved client IP when available, and optional user ID. The underlying
+backend error, raw URI/query, request body, credentials, cookies, session
+material, and arbitrary headers are not event fields.
+
+Normal `Result::Err` internal failures retain Topcoat's request context while
+the framework converts them into the generic 500 response. The application's
+security response headers therefore remain attached to those responses, and
+the sanitized request-internal-error event can be emitted before Topcoat
+performs the final client-facing conversion.
+
+Panic handling is a separate framework/runtime boundary. Topcoat 0.9 catches
+request-processing panics and returns a generic 500, preventing panic detail
+from becoming the response body, but that panic catcher operates outside the
+normal completed request-context path. This baseline therefore does not claim
+that application security-event classification or queued application response
+headers are preserved on panic-generated 500 responses. Outer runtime/process
+observability and production panic handling remain production-readiness work
+rather than being emulated inside application controllers.
+
+Server-side diagnostics must also remain deliberate. Production code must not
+dump arbitrary backend errors with `Debug` formatting merely because the
+client response is sanitized. Diagnostic logging should use intentional,
+bounded fields and must exclude secrets and raw request payloads by default.
+
 ## Authentication and session baseline
 
 The current authentication architecture deliberately separates application credential policy from the underlying Topcoat session transport.
@@ -1709,7 +1763,7 @@ Still to evaluate or complete as application-wide policy:
 - request-size limits
 - file-upload policy: unsupported by default; any future upload/import route must follow the explicit security contract above
 - broader rate-limiting policy: no blanket application limiter; specialized and route-specific quotas follow the explicit policy above
-- production error handling
+- production error handling: typed internal failures use generic 500 responses and sanitized security events; panic-boundary hardening remains production-readiness work
 - application audit logging
 
 ### POC 6 — Production readiness
