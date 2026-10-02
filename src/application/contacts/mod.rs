@@ -1,8 +1,12 @@
+mod audit;
 mod create;
 mod delete;
 mod list;
 mod update;
 mod validation;
+
+#[cfg(test)]
+mod audit_tests;
 
 #[cfg(test)]
 mod tests;

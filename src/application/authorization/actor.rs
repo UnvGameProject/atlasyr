@@ -12,6 +12,7 @@ use super::policy::{Permission, UserRole};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct AuthorizationActor {
+    user_id: Uuid,
     role: UserRole,
 }
 
@@ -22,27 +23,27 @@ pub(crate) struct ContactsReadGrant {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ContactsCreateGrant {
-    _private: (),
+    actor_user_id: Uuid,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ContactsUpdateGrant {
-    _private: (),
+    actor_user_id: Uuid,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ContactsDeleteGrant {
-    _private: (),
+    actor_user_id: Uuid,
 }
 
 impl AuthorizationActor {
-    fn new(role: UserRole) -> Self {
-        Self { role }
+    fn new(user_id: Uuid, role: UserRole) -> Self {
+        Self { user_id, role }
     }
 
     #[cfg(test)]
-    pub(super) fn for_test(role: UserRole) -> Self {
-        Self::new(role)
+    pub(super) fn for_test(user_id: Uuid, role: UserRole) -> Self {
+        Self::new(user_id, role)
     }
 
     #[cfg(test)]
@@ -59,19 +60,43 @@ impl AuthorizationActor {
     pub(crate) fn contacts_create(self) -> Option<ContactsCreateGrant> {
         self.role
             .allows(Permission::ContactsCreate)
-            .then_some(ContactsCreateGrant { _private: () })
+            .then_some(ContactsCreateGrant {
+                actor_user_id: self.user_id,
+            })
     }
 
     pub(crate) fn contacts_update(self) -> Option<ContactsUpdateGrant> {
         self.role
             .allows(Permission::ContactsUpdate)
-            .then_some(ContactsUpdateGrant { _private: () })
+            .then_some(ContactsUpdateGrant {
+                actor_user_id: self.user_id,
+            })
     }
 
     pub(crate) fn contacts_delete(self) -> Option<ContactsDeleteGrant> {
         self.role
             .allows(Permission::ContactsDelete)
-            .then_some(ContactsDeleteGrant { _private: () })
+            .then_some(ContactsDeleteGrant {
+                actor_user_id: self.user_id,
+            })
+    }
+}
+
+impl ContactsCreateGrant {
+    pub(crate) const fn actor_user_id(self) -> Uuid {
+        self.actor_user_id
+    }
+}
+
+impl ContactsUpdateGrant {
+    pub(crate) const fn actor_user_id(self) -> Uuid {
+        self.actor_user_id
+    }
+}
+
+impl ContactsDeleteGrant {
+    pub(crate) const fn actor_user_id(self) -> Uuid {
+        self.actor_user_id
     }
 }
 
@@ -127,5 +152,5 @@ pub(crate) async fn load_authorization_actor(
     let role = UserRole::from_persisted(&user.role)
         .map_err(|_| AuthorizationActorError::InvalidPersistedRole)?;
 
-    Ok(Some(AuthorizationActor::new(role)))
+    Ok(Some(AuthorizationActor::new(user_id, role)))
 }

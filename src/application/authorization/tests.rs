@@ -22,7 +22,7 @@ async fn create_test_user(pool: &PgPool, email: &str) -> User {
 }
 
 fn actor(role: UserRole) -> AuthorizationActor {
-    AuthorizationActor::for_test(role)
+    AuthorizationActor::for_test(Uuid::nil(), role)
 }
 
 #[test]
@@ -33,6 +33,36 @@ fn operator_can_receive_every_contacts_grant() {
     assert!(actor.contacts_create().is_some());
     assert!(actor.contacts_update().is_some());
     assert!(actor.contacts_delete().is_some());
+}
+
+#[test]
+fn mutation_grants_bind_authorized_actor_identity() {
+    let actor_user_id = Uuid::new_v4();
+    let actor = AuthorizationActor::for_test(actor_user_id, UserRole::Operator);
+
+    assert_eq!(
+        actor
+            .contacts_create()
+            .expect("operator should receive create grant")
+            .actor_user_id(),
+        actor_user_id,
+    );
+
+    assert_eq!(
+        actor
+            .contacts_update()
+            .expect("operator should receive update grant")
+            .actor_user_id(),
+        actor_user_id,
+    );
+
+    assert_eq!(
+        actor
+            .contacts_delete()
+            .expect("operator should receive delete grant")
+            .actor_user_id(),
+        actor_user_id,
+    );
 }
 
 #[test]
@@ -88,9 +118,30 @@ async fn operator_user_loads_as_operator_actor(pool: PgPool) {
     assert_eq!(actor.role(), UserRole::Operator);
 
     assert!(actor.contacts_read().is_some());
-    assert!(actor.contacts_create().is_some());
-    assert!(actor.contacts_update().is_some());
-    assert!(actor.contacts_delete().is_some());
+
+    assert_eq!(
+        actor
+            .contacts_create()
+            .expect("operator should receive create grant")
+            .actor_user_id(),
+        user.id,
+    );
+
+    assert_eq!(
+        actor
+            .contacts_update()
+            .expect("operator should receive update grant")
+            .actor_user_id(),
+        user.id,
+    );
+
+    assert_eq!(
+        actor
+            .contacts_delete()
+            .expect("operator should receive delete grant")
+            .actor_user_id(),
+        user.id,
+    );
 }
 
 #[sqlx::test]

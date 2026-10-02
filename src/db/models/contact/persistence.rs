@@ -1,5 +1,5 @@
 use garde::Valid;
-use sqlx::PgPool;
+use sqlx::{PgExecutor, PgPool};
 use uuid::Uuid;
 
 use crate::domain::contact::{ContactError, CreateContactInput, UpdateContactInput};
@@ -11,8 +11,8 @@ impl Contact {
     ///
     /// Accepting `Valid<CreateContactInput>` prevents unvalidated contact input
     /// from crossing this persistence boundary.
-    pub(crate) async fn create(
-        pool: &PgPool,
+    pub(crate) async fn create<'c>(
+        executor: impl PgExecutor<'c>,
         input: &Valid<CreateContactInput>,
     ) -> Result<Self, ContactError> {
         let id = Uuid::new_v4();
@@ -37,13 +37,13 @@ impl Contact {
             input.name(),
             input.email(),
         )
-        .fetch_one(pool)
+        .fetch_one(executor)
         .await
         .map_err(map_contact_error)
     }
 
-    pub(crate) async fn update(
-        pool: &PgPool,
+    pub(crate) async fn update<'c>(
+        executor: impl PgExecutor<'c>,
         id: Uuid,
         input: &Valid<UpdateContactInput>,
     ) -> Result<Self, ContactError> {
@@ -67,7 +67,7 @@ impl Contact {
             input.name(),
             input.email(),
         )
-        .fetch_optional(pool)
+        .fetch_optional(executor)
         .await
         .map_err(map_contact_error)?;
 
@@ -125,7 +125,10 @@ impl Contact {
         .await
     }
 
-    pub(crate) async fn delete(pool: &PgPool, id: Uuid) -> Result<(), ContactError> {
+    pub(crate) async fn delete<'c>(
+        executor: impl PgExecutor<'c>,
+        id: Uuid,
+    ) -> Result<(), ContactError> {
         let result = sqlx::query!(
             r#"
         DELETE FROM public.contacts
@@ -133,7 +136,7 @@ impl Contact {
         "#,
             id,
         )
-        .execute(pool)
+        .execute(executor)
         .await
         .map_err(map_contact_error)?;
 

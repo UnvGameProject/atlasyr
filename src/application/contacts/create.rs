@@ -1,13 +1,12 @@
 use sqlx::PgPool;
 
-use crate::application::authorization::ContactsCreateGrant;
-
 use crate::{
-    db::models::contact::Contact,
+    application::authorization::ContactsCreateGrant,
+    db::models::{audit_event::ContactAuditAction, contact::Contact},
     domain::contact::{ContactError, CreateContactInput},
 };
 
-use super::ContactValidation;
+use super::{ContactValidation, audit::commit_audited_contact_mutation};
 
 #[derive(Debug)]
 pub(crate) struct CreateContactCommand {
@@ -30,13 +29,14 @@ pub(crate) enum CreateContactOutcome {
 
 pub(crate) async fn create_contact(
     pool: &PgPool,
-    _authorization: ContactsCreateGrant,
+    authorization: ContactsCreateGrant,
     command: CreateContactCommand,
 ) -> Result<CreateContactOutcome, ContactError> {
     let input = CreateContactInput::from_untrusted(command.name, command.email);
 
     let input = match input.validate() {
         Ok(input) => input,
+
         Err(report) => {
             return Ok(CreateContactOutcome::Validation(
                 ContactValidation::from_report(&report),
@@ -44,8 +44,22 @@ pub(crate) async fn create_contact(
         }
     };
 
-    match Contact::create(pool, &input).await {
-        Ok(_) => Ok(CreateContactOutcome::Created),
+    let actor_user_id = authorization.actor_user_id();
+
+    let mut transaction = pool.begin().await.map_err(ContactError::storage)?;
+
+    match Contact::create(&mut *transaction, &input).await {
+        Ok(contact) => {
+            commit_audited_contact_mutation(
+                transaction,
+                actor_user_id,
+                ContactAuditAction::Create,
+                contact.id,
+            )
+            .await?;
+
+            Ok(CreateContactOutcome::Created)
+        }
 
         Err(ContactError::EmailAlreadyExists) => Ok(CreateContactOutcome::EmailAlreadyExists),
 

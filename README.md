@@ -1139,6 +1139,81 @@ dump arbitrary backend errors with `Debug` formatting merely because the
 client response is sanitized. Diagnostic logging should use intentional,
 bounded fields and must exclude secrets and raw request payloads by default.
 
+
+## Application audit logging policy
+
+Durable application audit history is distinct from request/security telemetry.
+
+The existing `SecurityEvent` stream records sanitized security decisions and
+request-level failure context. Durable application audit rows instead answer a
+narrow accountability question: which authenticated application user
+successfully changed which protected business resource, and when.
+
+The current durable audit scope is intentionally limited to successful
+authenticated Contacts mutations:
+
+- contact creation;
+- contact update; and
+- contact deletion.
+
+Authentication/session lifecycle events remain security telemetry rather than
+business audit rows. The trusted `create-user` operator workflow also remains
+outside this audit scope because it does not currently execute as an
+authenticated application user with an application actor identity.
+
+Mutation authorization and audit attribution share the same typed capability.
+`AuthorizationActor` retains the authenticated user's UUID, and each successful
+Contacts mutation grant carries that actor UUID into the application use case.
+Audit attribution is therefore not accepted as an independent web/form
+parameter and cannot drift from the identity whose authorization granted the
+mutation.
+
+Each durable `public.audit_events` row contains only:
+
+- a generated audit-event UUID;
+- the authenticated actor user UUID;
+- the typed mutation action (`create`, `update`, or `delete`);
+- the fixed resource type (`contact`);
+- the affected contact UUID; and
+- the database-generated event timestamp.
+
+The durable audit table deliberately excludes contact names and email
+addresses, before/after snapshots, request bodies, raw URIs or query strings,
+client IP addresses, cookies, credentials, session identifiers, token
+material, arbitrary headers, and open-ended metadata.
+
+Successful Contacts mutation persistence and its corresponding audit append
+execute inside the same SQL transaction. The application commits only after
+both operations succeed. If the audit append fails, the transaction is not
+committed and the contact create, update, or delete is rolled back. Validation
+failures, duplicate-email outcomes, not-found outcomes, and other unsuccessful
+typed application outcomes do not create durable audit rows.
+
+`actor_user_id` intentionally has no foreign key to `public.users`, and
+`resource_id` intentionally has no foreign key to `public.contacts`. Durable
+audit identifiers must survive future account retention/removal policy and
+contact deletion rather than being deleted or made impossible by the source
+row's lifecycle.
+
+Schema migrations remain independent of deployment-specific PostgreSQL role
+names so SQLx isolated test databases and migration-only environments can apply
+the same schema. After migrations complete in the real deployment path,
+`db::migrate::run` resets privileges on `public.audit_events` for
+`topcoat_app` and restores `INSERT` only.
+
+The runtime application therefore cannot select, update, delete, truncate,
+reference, or attach triggers to durable audit history. Reading, exporting, or
+retaining audit history requires a separate explicitly privileged operational
+path rather than expanding the application's runtime database privileges.
+
+The test contract proves successful actor/resource attribution, database action
+and resource constraints, absence of foreign-key lifecycle coupling, exclusion
+of unsuccessful application outcomes, and transaction rollback when audit
+persistence fails for contact creation, update, or deletion.
+
+Long-term audit retention, export, centralized collection, operational access,
+and broader observability remain production-readiness concerns for POC 6.
+
 ## Authentication and session baseline
 
 The current authentication architecture deliberately separates application credential policy from the underlying Topcoat session transport.
@@ -1764,7 +1839,7 @@ Still to evaluate or complete as application-wide policy:
 - file-upload policy: unsupported by default; any future upload/import route must follow the explicit security contract above
 - broader rate-limiting policy: no blanket application limiter; specialized and route-specific quotas follow the explicit policy above
 - production error handling: typed internal failures use generic 500 responses and sanitized security events; panic-boundary hardening remains production-readiness work
-- application audit logging
+- application audit logging: authenticated Contacts mutations are durably attributed and atomically committed with an INSERT-only runtime audit trail
 
 ### POC 6 — Production readiness
 

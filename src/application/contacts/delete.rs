@@ -1,9 +1,13 @@
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::application::authorization::ContactsDeleteGrant;
+use crate::{
+    application::authorization::ContactsDeleteGrant,
+    db::models::{audit_event::ContactAuditAction, contact::Contact},
+    domain::contact::ContactError,
+};
 
-use crate::{db::models::contact::Contact, domain::contact::ContactError};
+use super::audit::commit_audited_contact_mutation;
 
 #[derive(Debug)]
 pub(crate) struct DeleteContactCommand {
@@ -24,16 +28,33 @@ pub(crate) enum DeleteContactOutcome {
 
 pub(crate) async fn delete_contact(
     pool: &PgPool,
-    _authorization: ContactsDeleteGrant,
+    authorization: ContactsDeleteGrant,
     command: DeleteContactCommand,
 ) -> Result<DeleteContactOutcome, ContactError> {
     let id = match Uuid::parse_str(&command.id) {
         Ok(id) => id,
-        Err(_) => return Ok(DeleteContactOutcome::NotFound),
+
+        Err(_) => {
+            return Ok(DeleteContactOutcome::NotFound);
+        }
     };
 
-    match Contact::delete(pool, id).await {
-        Ok(()) => Ok(DeleteContactOutcome::Deleted),
+    let actor_user_id = authorization.actor_user_id();
+
+    let mut transaction = pool.begin().await.map_err(ContactError::storage)?;
+
+    match Contact::delete(&mut *transaction, id).await {
+        Ok(()) => {
+            commit_audited_contact_mutation(
+                transaction,
+                actor_user_id,
+                ContactAuditAction::Delete,
+                id,
+            )
+            .await?;
+
+            Ok(DeleteContactOutcome::Deleted)
+        }
 
         Err(ContactError::NotFound) => Ok(DeleteContactOutcome::NotFound),
 
