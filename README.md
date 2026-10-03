@@ -1808,38 +1808,69 @@ Current design direction:
 
 ### POC 4 — Authorization
 
-**Status: Planned**
+**Status: Green baseline for current POC scope**
 
-- policies
-- RBAC
-- ownership rules
-- route/action authorization
-- negative authorization tests
+The current authorization baseline is complete for the application's existing
+resource model:
+
+- explicit typed `viewer` and `operator` role policy;
+- permission-specific authorization grants for Contacts read/create/update/delete;
+- authorization enforced independently at externally callable Contacts routes/actions;
+- presentation authorization omits mutation controls for read-only viewers;
+- role-aware user provisioning supports the same persisted role model;
+- negative application and HTTP authorization tests prove viewers cannot acquire
+  or exercise Contacts mutation permissions; and
+- authorization grants bind authenticated actor identity for mutation
+  accountability without exposing session/token representation to application
+  policy code.
+
+Per-record ownership rules are not part of the current Contacts domain model and
+are therefore not fabricated as an artificial authorization layer. If a future
+resource introduces owner-scoped access, ownership must become an explicit
+policy dimension with corresponding negative tests rather than being inferred
+from the current role-only Contacts baseline.
 
 ### POC 5 — Web security hardening
 
-**Status: Partially implemented; broader hardening planned**
+**Status: Green baseline for current POC scope**
 
-Already represented in the current baseline:
+The application-wide web-security baseline is complete for the current POC:
 
-- authentication throttling
-- secure server-side session handling
-- generic credential failures
-- least-privilege database roles
-- typed/validated application input
-- default output escaping
-- Rusty security auditing
+- browser state-changing requests use an explicit strict same-origin policy with
+  no trusted cross-origin peers or exempt mutation routes;
+- CSP and response-security headers are applied through the shared application
+  router stack;
+- buffered request bodies have an explicit 64 KiB application-wide ceiling, with
+  any future upload/import feature required to opt into a separately reviewed
+  route-scoped limit;
+- sanitized typed security events cover authentication/session decisions and
+  relevant application/router failures without logging request payloads,
+  credentials, session/token material, raw queries, or backend error details;
+- uploads remain unsupported by default and are governed by the explicit
+  file-upload security policy before any future multipart route is introduced;
+- authentication retains its specialized account/client throttle, while broader
+  route quotas follow the documented policy rather than applying an arbitrary
+  blanket application limiter;
+- unexpected application failures cross the HTTP boundary as generic typed 500
+  responses while expected validation, duplicate, not-found, authentication,
+  authorization, and request-limit outcomes retain their intended control-flow
+  semantics; and
+- successful authenticated Contacts create/update/delete operations append a
+  minimal durable audit event in the same database transaction as the business
+  mutation, with the runtime role restricted to INSERT-only audit access.
 
-Still to evaluate or complete as application-wide policy:
+POC 5 does not claim full production deployment readiness. The following remain
+deliberately in POC 6 because they depend on runtime/deployment topology rather
+than the application-level web-security baseline:
 
-- CSRF/origin protections for all relevant mutation paths
-- CSP
-- security headers
-- request-size limits
-- file-upload policy: unsupported by default; any future upload/import route must follow the explicit security contract above
-- broader rate-limiting policy: no blanket application limiter; specialized and route-specific quotas follow the explicit policy above
-- production error handling: typed internal failures use generic 500 responses and sanitized security events; panic-boundary hardening remains production-readiness work
-- application audit logging: authenticated Contacts mutations are durably attributed and atomically committed with an INSERT-only runtime audit trail
+- panic-boundary integration with application response-header and security-event
+  observation;
+- trusted reverse-proxy configuration and forwarded-client-address policy;
+- production TLS termination and HSTS ownership;
+- whole-request/ingress telemetry and centralized observability;
+- dependency auditing and supply-chain release gates;
+- container/runtime hardening; and
+- production deployment, packaging, and operational strategy.
 
 ### POC 6 — Production readiness
 
