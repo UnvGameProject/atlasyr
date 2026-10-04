@@ -1,0 +1,74 @@
+#!/usr/bin/env sh
+set -eu
+
+PROJECT_ROOT="$(
+    CDPATH= cd -- "$(dirname -- "$0")" &&
+    pwd
+)"
+
+cd "$PROJECT_ROOT"
+
+compose() {
+    docker compose \
+        --project-directory "$PROJECT_ROOT" \
+        -f "$PROJECT_ROOT/compose.yaml" \
+        "$@"
+}
+
+printf '\n===== DEPENDENCY AUDIT — BUILD PINNED RUST TOOLING =====\n'
+
+compose build app >/dev/null
+
+printf '\n===== DEPENDENCY AUDIT — APPLICATION RUST GRAPH =====\n'
+
+compose run \
+    --rm \
+    --no-deps \
+    app \
+    cargo deny \
+        --manifest-path /app/Cargo.toml \
+        --config /app/deny.toml \
+        --all-features \
+        --locked \
+        check \
+        advisories \
+        sources
+
+printf '\n===== DEPENDENCY AUDIT — RUSTY CLI GRAPH =====\n'
+
+compose run \
+    --rm \
+    --no-deps \
+    app \
+    cargo deny \
+        --manifest-path /app/tools/rusty-cli/Cargo.toml \
+        --config /app/deny.toml \
+        --all-features \
+        --locked \
+        check \
+        advisories \
+        sources
+
+printf '\n===== DEPENDENCY AUDIT — FRONTEND LOCKFILE SOURCE POLICY =====\n'
+
+compose run \
+    --rm \
+    --no-deps \
+    assets \
+    node \
+        /workspace/docker/dependency-audit/check-package-lock.mjs \
+        /workspace/package-lock.json
+
+printf '\n===== DEPENDENCY AUDIT — FRONTEND VULNERABILITIES =====\n'
+
+compose run \
+    --rm \
+    --no-deps \
+    assets \
+    npm audit \
+        --package-lock-only \
+        --include=dev \
+        --audit-level=high \
+        --registry=https://registry.npmjs.org/
+
+printf '\n===== DEPENDENCY AUDIT GREEN =====\n'

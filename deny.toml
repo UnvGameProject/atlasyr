@@ -1,0 +1,26 @@
+# POC 6 dependency security policy.
+#
+# The release gate intentionally runs only the advisories and sources checks.
+# License/compliance and duplicate-version policy are separate concerns and
+# must not be silently invented as security requirements.
+
+[advisories]
+# A yanked crate is not acceptable for a new release baseline even when the
+# committed lockfile still makes the dependency resolution reproducible.
+yanked = "deny"
+
+# Advisory exceptions require an explicit reviewed entry with a rationale.
+ignore = []
+
+[sources]
+# External Rust dependencies must come from the explicitly trusted registry.
+# Git dependencies require a deliberate policy change and review rather than
+# appearing implicitly in a release graph.
+unknown-registry = "deny"
+unknown-git = "deny"
+
+allow-registry = [
+    "https://github.com/rust-lang/crates.io-index",
+]
+
+allow-git = []
