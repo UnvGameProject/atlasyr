@@ -1,8 +1,11 @@
 FROM rust:1.98.1-bookworm
 
+ENV RUSTFLAGS="-C linker-features=-lld" \
+    CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc
+
 RUN rustup component add rustfmt clippy \
     && cargo install topcoat-cli \
-        --version 0.9.0 \
+        --version 0.10.0 \
         --locked \
     && cargo install sqlx-cli \
         --version 0.9.0 \

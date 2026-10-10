@@ -19,8 +19,11 @@ RUN mkdir -p generated \
 
 FROM rust:1.98.1-bookworm AS rust-builder
 
+ENV RUSTFLAGS="-C linker-features=-lld" \
+    CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc
+
 RUN cargo install topcoat-cli \
-    --version 0.9.0 \
+    --version 0.10.0 \
     --locked
 
 WORKDIR /build
