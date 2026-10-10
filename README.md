@@ -1066,12 +1066,23 @@ semantics required for a caller-visible application quota. Tower concurrency
 or rate controls may still be useful later as internal capacity/backpressure
 tools where that behavior is intentional.
 
-Client-IP policy is deployment-sensitive. Topcoat trusts no reverse proxies by
-default and therefore uses the direct peer address until `TrustedProxies` is
-configured. Production must not broaden IP-based security decisions merely by
-trusting forwarded headers. The reverse-proxy/TLS architecture must define
-which proxy networks or hops are trusted before forwarded client addresses are
-used for broader application or edge rate limiting.
+Client-IP policy is deployment-sensitive and deny-first. Topcoat trusts no reverse proxies by default, so the application uses the direct peer address and ignores forwarded client-address headers unless an explicit trusted-proxy boundary is configured.
+
+Production deployments may configure `TRUSTED_PROXY_NETWORKS` as a comma-separated allowlist of exact proxy IP addresses and/or CIDR networks. The setting is loaded once at startup. An unset setting trusts no proxies; an explicitly empty, malformed, oversized, or catch-all configuration fails closed. Catch-all IPv4 and IPv6 networks such as `0.0.0.0/0` and `::/0` are not permitted.
+
+When a request arrives from an explicitly trusted proxy network, Topcoat's trusted-proxy policy may use `X-Forwarded-For` to resolve the originating client address. The ingress proxy must therefore remove or overwrite any client-supplied `X-Forwarded-For` value and construct the forwarding chain from connection metadata it actually observes. A deployment must never add a proxy network to `TRUSTED_PROXY_NETWORKS` while allowing arbitrary client forwarding headers to pass through unchanged.
+
+The resolved client address is security-sensitive application input. It is currently consumed by the authentication throttle and security-event telemetry. Trusted-proxy configuration must therefore reflect the real deployment topology rather than a broad private-network assumption, fixed hop count, or convenience default. Changes to proxy topology require corresponding review of the trusted-network allowlist.
+
+`X-Forwarded-Host` and `X-Forwarded-Proto` are not application trust inputs in this baseline. The existing strict same-origin policy remains independent of trusted client-address resolution and must not be weakened merely because the application is deployed behind a proxy.
+
+TLS terminates at the production ingress or reverse proxy rather than inside the application container. The ingress is responsible for accepting public HTTPS traffic, using an appropriately managed production certificate, and preventing ordinary public HTTP from reaching the application as an equivalent authenticated origin. The application container continues to serve its internal HTTP listener on the deployment network and must not be exposed directly to untrusted public traffic.
+
+HTTP Strict Transport Security is likewise an ingress responsibility for this baseline. The production HTTPS ingress should emit the deployment's reviewed `Strict-Transport-Security` policy after HTTPS behavior is verified for the intended host scope. The application does not infer TLS state from forwarding headers and does not independently emit HSTS.
+
+The ingress must preserve the externally authoritative request host information required by the application's browser same-origin boundary rather than substituting an unrelated internal upstream identity. Proxy routing, TLS termination, forwarded-client-address handling, and trusted-network configuration therefore form one deployment security boundary and must be validated together.
+
+Anonymous/global traffic shaping and volumetric abuse protection remain primarily ingress responsibilities, where connection identity, deployment topology, and aggregate traffic are visible. Application-level quotas remain separate from this infrastructure boundary and should continue to use client IP only where the abuse model requires it and the deployment's trusted-proxy configuration is explicit and verified.
 
 Process-local keyed limiters also do not constitute a globally authoritative
 quota across multiple application replicas. Instance-local defensive limits
@@ -1865,14 +1876,32 @@ than the application-level web-security baseline:
 
 - panic-boundary integration with application response-header and security-event
   observation;
-- trusted reverse-proxy configuration and forwarded-client-address policy;
-- production TLS termination and HSTS ownership;
 - whole-request/ingress telemetry and centralized observability;
 - dependency auditing and supply-chain release gates;
 - container/runtime hardening; and
 - production deployment, packaging, and operational strategy.
 
+The production-readiness work completed through POC 6D now includes dependency and reproducibility release gates, production packaging, Topcoat 0.10 compatibility, hardened non-root/read-only container execution, and the production reverse-proxy/TLS trust contract.
+
+The reverse-proxy boundary is deny-first: no forwarded client address is trusted unless the direct peer belongs to an explicitly configured `TRUSTED_PROXY_NETWORKS` allowlist. TLS termination and HSTS ownership belong to the production ingress, while the application retains its strict browser same-origin policy independently of forwarded client-address resolution.
+
 ### POC 6 — Production readiness
+
+**Status: In progress through POC 6D**
+
+Completed:
+
+- dependency auditing and reproducibility release gates;
+- production artifact/package contract;
+- Topcoat 0.10 production baseline;
+- production runtime/container hardening;
+- trusted reverse-proxy configuration and forwarded-client-address policy; and
+- production TLS termination and HSTS ownership contract.
+
+Remaining:
+
+- observability, panic handling, health, and graceful shutdown;
+- final production test matrix and CI/deployment closeout.
 
 **Status: Planned**
 
@@ -1881,7 +1910,6 @@ than the application-level web-security baseline:
 - container hardening
 - observability
 - deployment strategy
-- production reverse proxy/TLS architecture
 - production runtime-view validation/preload/package policy
 
 ## Decision criteria

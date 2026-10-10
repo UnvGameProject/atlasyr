@@ -4,14 +4,16 @@ use sqlx::PgPool;
 use topcoat::{
     asset::{AssetBundle, RouterBuilderAssetExt},
     cookie::RouterBuilderCookieExt,
-    router::{BodyLimit, OriginPolicy, Router, RouterBuilder, RouterBuilderDiscoverExt},
+    router::{
+        BodyLimit, OriginPolicy, Router, RouterBuilder, RouterBuilderDiscoverExt, TrustedProxies,
+    },
     runtime::RouterBuilderRuntimeExt,
     session::RouterBuilderSessionExt,
 };
 
 use crate::{
     auth::AuthManager,
-    config::{AppEnvironment, AuthConfig, DatabaseConfig},
+    config::{AppEnvironment, AuthConfig, DatabaseConfig, ProxyConfig},
     db,
     web::{
         ViewRenderer,
@@ -33,6 +35,11 @@ pub(crate) async fn run() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let auth_config = AuthConfig::load()?;
 
+    // Forwarded client addresses are trusted only from explicitly
+    // configured proxy networks. With no configuration Topcoat uses
+    // the direct peer and ignores client-supplied forwarding headers.
+    let proxy_config = ProxyConfig::load()?;
+
     let database = db::connect(&database_config, "topcoat-poc").await?;
 
     db::healthcheck(&database).await?;
@@ -41,7 +48,9 @@ pub(crate) async fn run() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let views = ViewRenderer::new(app_environment)?;
 
-    let router = router_builder(database, auth, views)
+    let trusted_proxies = TrustedProxies::new().networks(proxy_config.trusted_networks());
+
+    let router = router_builder_with_trusted_proxies(database, auth, views, trusted_proxies)
         .assets(AssetBundle::load().expect("Topcoat asset bundle was not found"))
         .build();
 
@@ -57,21 +66,57 @@ pub(crate) async fn run() -> Result<(), Box<dyn Error + Send + Sync>> {
 /// so cookies, sessions, runtime routing, discovery, and application contexts
 /// cannot silently diverge. Production adds its filesystem-backed asset bundle
 /// after this shared security boundary.
+#[cfg(test)]
 fn router_builder(database: PgPool, auth: AuthManager, views: ViewRenderer) -> RouterBuilder {
-    router_builder_with_security_events(database, auth, views, SecurityEventRecorder::stderr())
+    router_builder_with_trusted_proxies(database, auth, views, TrustedProxies::new())
 }
 
+fn router_builder_with_trusted_proxies(
+    database: PgPool,
+    auth: AuthManager,
+    views: ViewRenderer,
+    trusted_proxies: TrustedProxies,
+) -> RouterBuilder {
+    router_builder_with_security_events_and_trusted_proxies(
+        database,
+        auth,
+        views,
+        SecurityEventRecorder::stderr(),
+        trusted_proxies,
+    )
+}
+
+#[cfg(test)]
 fn router_builder_with_security_events(
     database: PgPool,
     auth: AuthManager,
     views: ViewRenderer,
     security_events: SecurityEventRecorder,
 ) -> RouterBuilder {
+    router_builder_with_security_events_and_trusted_proxies(
+        database,
+        auth,
+        views,
+        security_events,
+        TrustedProxies::new(),
+    )
+}
+
+fn router_builder_with_security_events_and_trusted_proxies(
+    database: PgPool,
+    auth: AuthManager,
+    views: ViewRenderer,
+    security_events: SecurityEventRecorder,
+    trusted_proxies: TrustedProxies,
+) -> RouterBuilder {
     // The selected auth driver owns the complete session-security profile.
     // There is no independent runtime switch that can weaken these settings.
     let session_config = auth.session_config();
 
     Router::builder()
+        // Forwarded client identity is resolved only through the
+        // explicitly configured trusted-proxy boundary.
+        .trusted_proxies(trusted_proxies)
         // Cookie-authenticated browser mutations must remain same-origin.
         // Keep Topcoat's strict policy explicit: no trusted cross-origin
         // peers and no exempt routes.
