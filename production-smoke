@@ -105,6 +105,22 @@ test "$(
 printf '%s\n' \
     'production targets use the dedicated non-root runtime identity'
 
+
+test "$(
+    docker image inspect \
+        --format '{{.Config.StopSignal}}' \
+        "$APP_IMAGE"
+)" = 'SIGTERM'
+
+test "$(
+    docker image inspect \
+        --format '{{json .Config.Healthcheck}}' \
+        "$APP_IMAGE"
+)" = 'null'
+
+printf '%s\n' \
+    'production application image declares SIGTERM and no image-local healthcheck'
+
 printf '\n===== VERIFY PACKAGED ARTIFACT OWNERSHIP =====\n'
 
 for IMAGE in \
@@ -538,6 +554,63 @@ fi
 printf '%s\n' \
     'production application served the public home page'
 
+
+printf '\n===== VERIFY LIVENESS / READINESS / REQUEST TELEMETRY =====\n'
+
+HEALTH_QUERY_SECRET='health-query-must-not-be-logged'
+
+LIVE_BODY="$(
+    curl \
+        --fail \
+        --silent \
+        --show-error \
+        "http://127.0.0.1:${HOST_PORT}/health/live?probe=${HEALTH_QUERY_SECRET}"
+)"
+
+test "$LIVE_BODY" = 'live'
+
+READY_BODY="$(
+    curl \
+        --fail \
+        --silent \
+        --show-error \
+        "http://127.0.0.1:${HOST_PORT}/health/ready"
+)"
+
+test "$READY_BODY" = 'ready'
+
+docker logs \
+    "$APP_CONTAINER" \
+    >"$TEMP_DIR/health-observability.log" \
+    2>&1
+
+grep -Eq \
+    '^request_event method=GET route=/health/live client_ip=[^ ]+ status=200 outcome=ok duration_ms=[0-9]+$' \
+    "$TEMP_DIR/health-observability.log"
+
+grep -Eq \
+    '^request_event method=GET route=/health/ready client_ip=[^ ]+ status=200 outcome=ok duration_ms=[0-9]+$' \
+    "$TEMP_DIR/health-observability.log"
+
+if grep -Fq \
+    "$HEALTH_QUERY_SECRET" \
+    "$TEMP_DIR/health-observability.log"
+then
+    printf '%s\n' \
+        'ERROR: operational request telemetry exposed a query-string value' >&2
+    exit 1
+fi
+
+grep -Fq \
+    'application_event kind=server_starting shutdown_timeout_secs=30' \
+    "$TEMP_DIR/health-observability.log"
+
+printf '%s\n' \
+    'liveness and readiness endpoints serve independently scoped health checks'
+
+printf '%s\n' \
+    'operational request telemetry uses matched routes without query strings'
+
 printf '\n===== VERIFY LIVE CONTAINER HARDENING =====\n'
 
 docker inspect \
@@ -835,12 +908,43 @@ print(
 )
 PYASSET
 
-printf '\n===== STOP SUCCESSFUL APP INSTANCE =====\n'
+printf '\n===== VERIFY SIGTERM GRACEFUL SHUTDOWN =====\n'
 
-docker rm \
-    --force \
+docker stop \
+    --time 35 \
     "$APP_CONTAINER" \
     >/dev/null
+
+APP_EXIT_CODE="$(
+    docker inspect \
+        --format '{{.State.ExitCode}}' \
+        "$APP_CONTAINER"
+)"
+
+APP_OOM_KILLED="$(
+    docker inspect \
+        --format '{{.State.OOMKilled}}' \
+        "$APP_CONTAINER"
+)"
+
+test "$APP_EXIT_CODE" = '0'
+test "$APP_OOM_KILLED" = 'false'
+
+docker logs \
+    "$APP_CONTAINER" \
+    >"$TEMP_DIR/graceful-shutdown.log" \
+    2>&1
+
+grep -Fq \
+    'application_event kind=shutdown_complete' \
+    "$TEMP_DIR/graceful-shutdown.log"
+
+docker rm \
+    "$APP_CONTAINER" \
+    >/dev/null
+
+printf '%s\n' \
+    'SIGTERM completed through Topcoat graceful shutdown with exit code 0'
 
 
 printf '\n===== VERIFY EXPLICIT TRUSTED PROXY CLIENT ADDRESS =====\n'
@@ -1051,12 +1155,21 @@ set -e
 
 test "$MISSING_ASSET_STATUS" -ne 0
 
-grep -Eq \
-    'Topcoat asset bundle was not found|no asset bundle' \
+grep -Fq \
+    'application_event kind=panic' \
     "$TEMP_DIR/missing-assets.log"
 
+if grep -Eq \
+    'Topcoat asset bundle was not found|no asset bundle|panicked at' \
+    "$TEMP_DIR/missing-assets.log"
+then
+    printf '%s\n' \
+        'ERROR: production panic output exposed panic detail' >&2
+    exit 1
+fi
+
 printf '%s\n' \
-    'missing production asset bundle fails closed during startup'
+    'missing production asset bundle fails closed with sanitized panic telemetry'
 
 printf '\n===== PRODUCTION PACKAGE SMOKE GREEN =====\n'
 )

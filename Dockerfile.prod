@@ -102,6 +102,8 @@ ENV APP_ENV=production \
 
 EXPOSE 3000
 
+STOPSIGNAL SIGTERM
+
 ENTRYPOINT ["/app/topcoat-poc"]
 
 

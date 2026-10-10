@@ -1,4 +1,5 @@
 mod contacts;
+mod health;
 mod home;
 mod login;
 mod view_dx;

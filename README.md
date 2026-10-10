@@ -1136,19 +1136,30 @@ security response headers therefore remain attached to those responses, and
 the sanitized request-internal-error event can be emitted before Topcoat
 performs the final client-facing conversion.
 
-Panic handling is a separate framework/runtime boundary. Topcoat 0.9 catches
-request-processing panics and returns a generic 500, preventing panic detail
-from becoming the response body, but that panic catcher operates outside the
-normal completed request-context path. This baseline therefore does not claim
-that application security-event classification or queued application response
-headers are preserved on panic-generated 500 responses. Outer runtime/process
-observability and production panic handling remain production-readiness work
-rather than being emulated inside application controllers.
+Panic handling remains a framework/runtime boundary. Topcoat 0.10 catches request-processing panics and converts them to generic HTTP 500 responses outside the normal completed application-layer path. The application therefore does not attempt to duplicate Topcoat's panic catcher or infer a normal request outcome after a panic.
 
-Server-side diagnostics must also remain deliberate. Production code must not
-dump arbitrary backend errors with `Debug` formatting merely because the
-client response is sanitized. Diagnostic logging should use intentional,
-bounded fields and must exclude secrets and raw request payloads by default.
+Production installs a deliberately sanitized panic hook. A panic emits only:
+
+`application_event kind=panic`
+
+The production panic event does not include the panic payload, source location, backtrace, raw request data, backend error details, credentials, cookies, session material, or arbitrary headers. Production smoke testing proves that startup panics still fail closed while detailed panic text remains absent from logs.
+
+Normal completed requests are observed by the application-owned request telemetry layer. Each `request_event` contains only the HTTP method, Topcoat matched route pattern, resolved client IP when available, response status when the application layer receives a completed response, an `ok` or `error` outcome, and elapsed milliseconds. Raw URI values, query strings, path-parameter values, request and response bodies, arbitrary headers, credentials, cookies, session material, and backend error values are excluded.
+
+Typed application errors remain Topcoat errors until the framework converts them into their final HTTP responses. For those error paths, operational request telemetry records `outcome=error` with no fabricated status value, while the existing security-event layer independently records typed security-relevant failures.
+
+The production health contract exposes two distinct unauthenticated endpoints:
+
+- `GET /health/live` verifies only that the application process and router are responsive. It does not depend on PostgreSQL.
+- `GET /health/ready` verifies the application's required PostgreSQL dependency through the application-layer readiness seam and its existing `SELECT 1` database healthcheck. Database failure returns HTTP 503 with a short `Retry-After` response rather than exposing database error details.
+
+Liveness and readiness are intentionally separate. A temporary database outage must remove the instance from ready traffic without falsely declaring the application process dead.
+
+Graceful shutdown is owned by Topcoat's server lifecycle. The application wraps the router in `RouterService` with an explicit 30-second shutdown timeout rather than relying silently on a framework default. The production image declares `STOPSIGNAL SIGTERM`; on SIGTERM, Topcoat stops accepting new connections and allows active requests to complete within that drain window. Normal shutdown emits `application_event kind=shutdown_complete`, and production smoke testing verifies a clean exit code of zero.
+
+The application image intentionally does not define a Docker `HEALTHCHECK`. The minimal runtime image does not carry an HTTP client solely for probing, and a single image-level check would blur the distinction between liveness and dependency-backed readiness. The deployment platform should probe `/health/live` and `/health/ready` according to their separate semantics.
+
+Server-side diagnostics remain deliberately bounded. Production code must not dump arbitrary backend errors with `Debug` formatting merely because the client response is sanitized. Operational telemetry uses explicit fields and excludes secrets and raw request payloads by default.
 
 
 ## Application audit logging policy
@@ -1222,8 +1233,10 @@ and resource constraints, absence of foreign-key lifecycle coupling, exclusion
 of unsuccessful application outcomes, and transaction rollback when audit
 persistence fails for contact creation, update, or deletion.
 
-Long-term audit retention, export, centralized collection, operational access,
-and broader observability remain production-readiness concerns for POC 6.
+Long-term audit retention, export, centralized collection, and operational access
+remain separate deployment and operations concerns. POC 6E adds sanitized application
+request and lifecycle telemetry, but it does not claim centralized log shipping,
+telemetry retention, or durable audit export.
 
 ## Authentication and session baseline
 
@@ -1870,24 +1883,13 @@ The application-wide web-security baseline is complete for the current POC:
   minimal durable audit event in the same database transaction as the business
   mutation, with the runtime role restricted to INSERT-only audit access.
 
-POC 5 does not claim full production deployment readiness. The following remain
-deliberately in POC 6 because they depend on runtime/deployment topology rather
-than the application-level web-security baseline:
+POC 5 intentionally deferred runtime and deployment concerns to POC 6 rather than emulating them inside application controllers. Through POC 6E, the production baseline now covers dependency and reproducibility gates, production packaging, hardened container execution, reverse-proxy/TLS trust, operational request telemetry, sanitized panic telemetry, explicit health/readiness semantics, and graceful process shutdown.
 
-- panic-boundary integration with application response-header and security-event
-  observation;
-- whole-request/ingress telemetry and centralized observability;
-- dependency auditing and supply-chain release gates;
-- container/runtime hardening; and
-- production deployment, packaging, and operational strategy.
-
-The production-readiness work completed through POC 6D now includes dependency and reproducibility release gates, production packaging, Topcoat 0.10 compatibility, hardened non-root/read-only container execution, and the production reverse-proxy/TLS trust contract.
-
-The reverse-proxy boundary is deny-first: no forwarded client address is trusted unless the direct peer belongs to an explicitly configured `TRUSTED_PROXY_NETWORKS` allowlist. TLS termination and HSTS ownership belong to the production ingress, while the application retains its strict browser same-origin policy independently of forwarded client-address resolution.
+Centralized log shipping, retention, external metrics/alerting, and deployment-platform configuration remain deployment concerns rather than application framework responsibilities.
 
 ### POC 6 — Production readiness
 
-**Status: In progress through POC 6D**
+**Status: In progress through POC 6E**
 
 Completed:
 
@@ -1895,12 +1897,15 @@ Completed:
 - production artifact/package contract;
 - Topcoat 0.10 production baseline;
 - production runtime/container hardening;
-- trusted reverse-proxy configuration and forwarded-client-address policy; and
-- production TLS termination and HSTS ownership contract.
+- trusted reverse-proxy configuration and forwarded-client-address policy;
+- production TLS termination and HSTS ownership contract;
+- sanitized whole-request operational telemetry;
+- sanitized production panic telemetry;
+- separate liveness and PostgreSQL-backed readiness endpoints; and
+- explicit SIGTERM handling with a 30-second Topcoat graceful-drain contract.
 
 Remaining:
 
-- observability, panic handling, health, and graceful shutdown;
 - final production test matrix and CI/deployment closeout.
 
 **Status: Planned**

@@ -1,11 +1,12 @@
-use std::error::Error;
+use std::{error::Error, time::Duration};
 
 use sqlx::PgPool;
 use topcoat::{
     asset::{AssetBundle, RouterBuilderAssetExt},
     cookie::RouterBuilderCookieExt,
     router::{
-        BodyLimit, OriginPolicy, Router, RouterBuilder, RouterBuilderDiscoverExt, TrustedProxies,
+        BodyLimit, OriginPolicy, Router, RouterBuilder, RouterBuilderDiscoverExt, RouterService,
+        TrustedProxies,
     },
     runtime::RouterBuilderRuntimeExt,
     session::RouterBuilderSessionExt,
@@ -17,6 +18,7 @@ use crate::{
     db,
     web::{
         ViewRenderer,
+        request_events::RequestEventLayer,
         security_events::{SecurityEventLayer, SecurityEventRecorder},
         security_headers::SecurityHeaders,
     },
@@ -28,8 +30,20 @@ use crate::{
 // than silently widening this application-wide boundary.
 const REQUEST_BODY_LIMIT_BYTES: usize = 64 * 1024;
 
+/// Keep the production drain window explicit rather than inheriting a
+/// framework default that could change during a future upgrade.
+const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Production panic telemetry is intentionally payload-free. Topcoat owns
+/// request-panic conversion to the generic HTTP 500 response.
+const PRODUCTION_PANIC_EVENT: &str = "application_event kind=panic";
+
 pub(crate) async fn run() -> Result<(), Box<dyn Error + Send + Sync>> {
     let app_environment = AppEnvironment::load()?;
+
+    if matches!(&app_environment, AppEnvironment::Production) {
+        install_production_panic_hook();
+    }
 
     let database_config = DatabaseConfig::load()?;
 
@@ -54,9 +68,24 @@ pub(crate) async fn run() -> Result<(), Box<dyn Error + Send + Sync>> {
         .assets(AssetBundle::load().expect("Topcoat asset bundle was not found"))
         .build();
 
-    topcoat::start(router).await?;
+    let service = RouterService::new(router).shutdown_timeout(SHUTDOWN_TIMEOUT);
+
+    eprintln!(
+        "application_event kind=server_starting shutdown_timeout_secs={}",
+        SHUTDOWN_TIMEOUT.as_secs(),
+    );
+
+    topcoat::start(service).await?;
+
+    eprintln!("application_event kind=shutdown_complete");
 
     Ok(())
+}
+
+fn install_production_panic_hook() {
+    std::panic::set_hook(Box::new(|_| {
+        eprintln!("{}", PRODUCTION_PANIC_EVENT,);
+    }));
 }
 
 /// Build the application's real HTTP security/application router stack
@@ -133,6 +162,10 @@ fn router_builder_with_security_events_and_trusted_proxies(
         // Application response security policy must wrap the Topcoat
         // runtime as well as discovered application routes.
         .layer(SecurityHeaders)
+        // Whole-request telemetry is the outermost application-owned layer.
+        // Topcoat's origin policy and panic catcher remain framework-owned
+        // boundaries outside it.
+        .layer(RequestEventLayer)
         .runtime()
         .discover()
         .app_context(database)
@@ -158,7 +191,10 @@ mod tests {
         },
     };
 
-    use super::{REQUEST_BODY_LIMIT_BYTES, router_builder, router_builder_with_security_events};
+    use super::{
+        PRODUCTION_PANIC_EVENT, REQUEST_BODY_LIMIT_BYTES, SHUTDOWN_TIMEOUT, router_builder,
+        router_builder_with_security_events,
+    };
 
     const VIEWER_EMAIL: &str = "viewer-http-proof@example.com";
 
@@ -597,6 +633,73 @@ mod tests {
             // boundary even when body extraction fails before the handler.
             assert_security_headers(&response);
         }
+    }
+
+    #[test]
+    fn production_runtime_event_contract_is_explicit() {
+        assert_eq!(SHUTDOWN_TIMEOUT.as_secs(), 30,);
+
+        assert_eq!(PRODUCTION_PANIC_EVENT, "application_event kind=panic",);
+    }
+
+    #[sqlx::test]
+    async fn health_routes_separate_liveness_from_database_readiness(pool: sqlx::PgPool) {
+        let auth = AuthManager::from_config(&AuthConfig::local_topcoat_for_test());
+
+        let views = ViewRenderer::new(AppEnvironment::Testing)
+            .expect("testing view renderer should initialize");
+
+        let router = router_builder(pool.clone(), auth, views).build();
+
+        let live = router
+            .handle(request("GET", "/health/live", None, None, Body::empty()))
+            .await;
+
+        assert_eq!(
+            live.status().as_u16(),
+            200,
+            "liveness must succeed while the process/router is responsive",
+        );
+
+        let ready = router
+            .handle(request("GET", "/health/ready", None, None, Body::empty()))
+            .await;
+
+        assert_eq!(
+            ready.status().as_u16(),
+            200,
+            "readiness must succeed while PostgreSQL is reachable",
+        );
+
+        pool.close().await;
+
+        let live_without_database = router
+            .handle(request("GET", "/health/live", None, None, Body::empty()))
+            .await;
+
+        assert_eq!(
+            live_without_database.status().as_u16(),
+            200,
+            "database failure must not turn process liveness into failure",
+        );
+
+        let unready = router
+            .handle(request("GET", "/health/ready", None, None, Body::empty()))
+            .await;
+
+        assert_eq!(
+            unready.status().as_u16(),
+            503,
+            "database failure must make the application unready",
+        );
+
+        assert_eq!(
+            unready
+                .headers()
+                .get("retry-after")
+                .and_then(|value| value.to_str().ok(),),
+            Some("1"),
+        );
     }
 
     #[sqlx::test]
