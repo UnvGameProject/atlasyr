@@ -13,6 +13,12 @@ APP_IMAGE='topcoat-poc-production-app:smoke'
 MIGRATE_IMAGE='topcoat-poc-production-migrate:smoke'
 CREATE_USER_IMAGE='topcoat-poc-production-create-user:smoke'
 
+RUNTIME_HARDENING=(
+    --read-only
+    --cap-drop ALL
+    --security-opt no-new-privileges=true
+)
+
 APP_CONTAINER='topcoat-poc-production-smoke-app'
 
 TEMP_DIR="$(
@@ -99,9 +105,53 @@ test "$(
 printf '%s\n' \
     'production targets use the dedicated non-root runtime identity'
 
+printf '\n===== VERIFY PACKAGED ARTIFACT OWNERSHIP =====\n'
+
+for IMAGE in \
+    "$APP_IMAGE" \
+    "$MIGRATE_IMAGE" \
+    "$CREATE_USER_IMAGE"
+do
+    docker run \
+        "${RUNTIME_HARDENING[@]}" \
+        --rm \
+        --entrypoint /bin/sh \
+        "$IMAGE" \
+        -c '
+            set -eu
+
+            NON_ROOT_OWNED="$(
+                find /app \
+                    -xdev \
+                    \( \
+                        ! -user root \
+                        -o ! -group root \
+                    \) \
+                    -print \
+                    -quit
+            )"
+
+            test -z "$NON_ROOT_OWNED"
+
+            WRITABLE_MODE="$(
+                find /app \
+                    -xdev \
+                    -perm /022 \
+                    -print \
+                    -quit
+            )"
+
+            test -z "$WRITABLE_MODE"
+        '
+done
+
+printf '%s\n' \
+    'production artifacts are root-owned and not group/other writable'
+
 printf '\n===== VERIFY APP IMAGE PACKAGE SURFACE =====\n'
 
 docker run \
+    "${RUNTIME_HARDENING[@]}" \
     --rm \
     --entrypoint /bin/sh \
     "$APP_IMAGE" \
@@ -173,6 +223,7 @@ docker run \
 printf '\n===== VERIFY OPERATIONAL TARGET ISOLATION =====\n'
 
 docker run \
+    "${RUNTIME_HARDENING[@]}" \
     --rm \
     --entrypoint /bin/sh \
     "$MIGRATE_IMAGE" \
@@ -191,6 +242,7 @@ docker run \
     '
 
 docker run \
+    "${RUNTIME_HARDENING[@]}" \
     --rm \
     --entrypoint /bin/sh \
     "$CREATE_USER_IMAGE" \
@@ -211,6 +263,7 @@ docker run \
 printf '\n===== VERIFY APP DYNAMIC LIBRARIES RESOLVE =====\n'
 
 docker run \
+    "${RUNTIME_HARDENING[@]}" \
     --rm \
     --entrypoint /usr/bin/ldd \
     "$APP_IMAGE" \
@@ -263,6 +316,7 @@ PY
 printf '\n===== VERIFY PACKAGED ASSET BUNDLE =====\n'
 
 docker run \
+    "${RUNTIME_HARDENING[@]}" \
     --rm \
     --entrypoint /bin/sh \
     "$APP_IMAGE" \
@@ -326,6 +380,7 @@ printf 'compose network: %s\n' "$NETWORK"
 printf '\n===== RUN PRODUCTION MIGRATION ARTIFACT =====\n'
 
 docker run \
+    "${RUNTIME_HARDENING[@]}" \
     --rm \
     --network "$NETWORK" \
     --env DB_HOST=postgres \
@@ -340,6 +395,52 @@ docker run \
 printf '%s\n' \
     'production migration artifact executed successfully'
 
+printf '\n===== VERIFY HARDENED CREATE-USER ARTIFACT =====\n'
+
+set +e
+
+printf '%s\n' \
+    'container-hardening-smoke-password' \
+    | docker run \
+        "${RUNTIME_HARDENING[@]}" \
+        --interactive \
+        --rm \
+        --network "$NETWORK" \
+        --env DB_HOST=postgres \
+        --env DB_PORT=5432 \
+        --env DB_NAME=topcoat_poc \
+        --env DB_USER=topcoat_migrator \
+        --env DB_PASSWORD_FILE=/run/secrets/database_password \
+        --mount \
+            "type=bind,src=$PROJECT_ROOT/.secrets/postgres_migrator_password,dst=/run/secrets/database_password,readonly" \
+        "$CREATE_USER_IMAGE" \
+        not-an-email \
+        viewer \
+        >"$TEMP_DIR/create-user-validation.log" \
+        2>&1
+
+CREATE_USER_STATUS=$?
+
+set -e
+
+test "$CREATE_USER_STATUS" -ne 0
+
+grep -Fq \
+    'email address is invalid' \
+    "$TEMP_DIR/create-user-validation.log"
+
+if grep -Fq \
+    'container-hardening-smoke-password' \
+    "$TEMP_DIR/create-user-validation.log"
+then
+    printf '%s\n' \
+        'ERROR: create-user output exposed password input' >&2
+    exit 1
+fi
+
+printf '%s\n' \
+    'create-user reaches application validation under hardened runtime without persisting a smoke user'
+
 printf '\n===== START PRODUCTION APPLICATION IMAGE =====\n'
 
 docker rm \
@@ -349,6 +450,7 @@ docker rm \
     || true
 
 docker run \
+    "${RUNTIME_HARDENING[@]}" \
     --detach \
     --name "$APP_CONTAINER" \
     --network "$NETWORK" \
@@ -422,11 +524,115 @@ fi
 printf '%s\n' \
     'production application served the public home page'
 
+printf '\n===== VERIFY LIVE CONTAINER HARDENING =====\n'
+
+docker inspect \
+    "$APP_CONTAINER" \
+    | python3 -c '
+import json
+import sys
+
+data = json.load(sys.stdin)
+
+if len(data) != 1:
+    raise SystemExit(
+        f"expected one application container, found {len(data)}"
+    )
+
+host = data[0]["HostConfig"]
+
+if host.get("ReadonlyRootfs") is not True:
+    raise SystemExit(
+        "production application root filesystem is not read-only"
+    )
+
+cap_drop = host.get("CapDrop") or []
+
+if sorted(
+    value.upper()
+    for value in cap_drop
+) != ["ALL"]:
+    raise SystemExit(
+        f"unexpected capability drop contract: {cap_drop!r}"
+    )
+
+security_opt = host.get("SecurityOpt") or []
+
+if "no-new-privileges=true" not in security_opt:
+    raise SystemExit(
+        f"no-new-privileges is missing: {security_opt!r}"
+    )
+
+tmpfs = host.get("Tmpfs")
+
+if tmpfs not in (None, {}):
+    raise SystemExit(
+        f"unexpected writable tmpfs surface: {tmpfs!r}"
+    )
+
+print(
+    "container host config: read-only rootfs, "
+    "cap-drop ALL, no-new-privileges, no tmpfs"
+)
+'
+
+docker exec \
+    "$APP_CONTAINER" \
+    /bin/sh \
+    -c '
+        set -eu
+
+        test "$(
+            awk \
+                "/^NoNewPrivs:/ { print \$2 }" \
+                /proc/1/status
+        )" = 1
+
+        for FIELD in \
+            CapInh \
+            CapPrm \
+            CapEff \
+            CapBnd \
+            CapAmb
+        do
+            VALUE="$(
+                awk \
+                    -v field="$FIELD:" \
+                    "\$1 == field { print \$2 }" \
+                    /proc/1/status
+            )"
+
+            test "$VALUE" = 0000000000000000
+        done
+    '
+
+printf '%s\n' \
+    'live application process has NoNewPrivs=1 and zero capability sets'
+
+printf '\n===== VERIFY PACKAGED APPLICATION CANNOT MUTATE =====\n'
+
+if docker exec \
+    "$APP_CONTAINER" \
+    /bin/sh \
+    -c '
+        touch /app/production-smoke-should-not-write
+    ' \
+    >/dev/null 2>&1
+then
+    printf '%s\n' \
+        'ERROR: hardened application mutated packaged /app content' >&2
+    exit 1
+fi
+
+printf '%s\n' \
+    'read-only production filesystem rejects application writes'
+
 printf '\n===== VERIFY PACKAGED ASSET IS SERVED =====\n'
 
 BUNDLED_ASSETS="$TEMP_DIR/bundled-assets.txt"
 
 docker run \
+    "${RUNTIME_HARDENING[@]}" \
     --rm \
     --entrypoint /bin/sh \
     "$APP_IMAGE" \
@@ -566,6 +772,7 @@ mkdir -p "$EMPTY_VIEWS"
 set +e
 
 docker run \
+    "${RUNTIME_HARDENING[@]}" \
     --rm \
     --network "$NETWORK" \
     --env DB_HOST=postgres \
@@ -602,6 +809,7 @@ mkdir -p "$EMPTY_ASSETS"
 set +e
 
 docker run \
+    "${RUNTIME_HARDENING[@]}" \
     --rm \
     --network "$NETWORK" \
     --env DB_HOST=postgres \

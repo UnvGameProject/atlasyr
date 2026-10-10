@@ -84,16 +84,14 @@ USER 10001:10001
 FROM runtime-base AS app
 
 COPY --from=rust-builder \
-    --chown=10001:10001 \
     /build/target/release/topcoat-poc \
     /app/topcoat-poc
 
 COPY --from=rust-builder \
-    --chown=10001:10001 \
     /build/target/release/assets \
     /app/assets
 
-COPY --chown=10001:10001 \
+COPY \
     resources/views \
     /app/resources/views
 
@@ -110,7 +108,6 @@ ENTRYPOINT ["/app/topcoat-poc"]
 FROM runtime-base AS migrate
 
 COPY --from=rust-builder \
-    --chown=10001:10001 \
     /build/target/release/migrate \
     /app/migrate
 
@@ -120,7 +117,6 @@ ENTRYPOINT ["/app/migrate"]
 FROM runtime-base AS create-user
 
 COPY --from=rust-builder \
-    --chown=10001:10001 \
     /build/target/release/create-user \
     /app/create-user
 
