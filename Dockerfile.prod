@@ -1,0 +1,124 @@
+# syntax=docker/dockerfile:1
+
+FROM node:24.21.0-bookworm-slim AS frontend-builder
+
+WORKDIR /build
+
+COPY package.json package-lock.json ./
+
+RUN npm ci \
+    --ignore-scripts \
+    --no-audit \
+    --no-fund
+
+COPY resources ./resources
+
+RUN mkdir -p generated \
+    && npm run build:assets
+
+
+FROM rust:1.98.1-bookworm AS rust-builder
+
+RUN cargo install topcoat-cli \
+    --version 0.9.0 \
+    --locked
+
+WORKDIR /build
+
+ENV SQLX_OFFLINE=true
+
+COPY Cargo.toml Cargo.lock build.rs ./
+COPY crates ./crates
+COPY src ./src
+COPY migrations ./migrations
+COPY .sqlx ./.sqlx
+COPY resources/css ./resources/css
+
+COPY --from=frontend-builder /build/generated ./generated
+
+RUN before="$(sha256sum Cargo.lock)" \
+    && topcoat asset bundle \
+        --release \
+        --bin topcoat-poc \
+    && after="$(sha256sum Cargo.lock)" \
+    && test "$before" = "$after" \
+    && test -x target/release/topcoat-poc \
+    && test -s target/release/assets/manifest.toml
+
+RUN cargo build \
+    --release \
+    --locked \
+    --bin migrate \
+    --bin create-user
+
+
+FROM debian:bookworm-slim AS runtime-base
+
+RUN apt-get update \
+    && apt-get install \
+        --yes \
+        --no-install-recommends \
+        libgcc-s1 \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd \
+        --system \
+        --gid 10001 \
+        topcoat \
+    && useradd \
+        --system \
+        --uid 10001 \
+        --gid 10001 \
+        --home-dir /nonexistent \
+        --no-create-home \
+        --shell /usr/sbin/nologin \
+        topcoat
+
+WORKDIR /app
+
+USER 10001:10001
+
+
+FROM runtime-base AS app
+
+COPY --from=rust-builder \
+    --chown=10001:10001 \
+    /build/target/release/topcoat-poc \
+    /app/topcoat-poc
+
+COPY --from=rust-builder \
+    --chown=10001:10001 \
+    /build/target/release/assets \
+    /app/assets
+
+COPY --chown=10001:10001 \
+    resources/views \
+    /app/resources/views
+
+ENV APP_ENV=production \
+    AUTH_DRIVER=local-topcoat \
+    HOST=0.0.0.0 \
+    PORT=3000
+
+EXPOSE 3000
+
+ENTRYPOINT ["/app/topcoat-poc"]
+
+
+FROM runtime-base AS migrate
+
+COPY --from=rust-builder \
+    --chown=10001:10001 \
+    /build/target/release/migrate \
+    /app/migrate
+
+ENTRYPOINT ["/app/migrate"]
+
+
+FROM runtime-base AS create-user
+
+COPY --from=rust-builder \
+    --chown=10001:10001 \
+    /build/target/release/create-user \
+    /app/create-user
+
+ENTRYPOINT ["/app/create-user"]
