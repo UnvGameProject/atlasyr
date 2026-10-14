@@ -8,11 +8,11 @@ use clap::{Args, Parser, Subcommand};
 )]
 pub(crate) struct Cli {
     #[command(subcommand)]
-    pub(crate) command: Command,
+    pub(crate) command: CliCommand,
 }
 
 #[derive(Debug, Subcommand)]
-pub(crate) enum Command {
+pub(crate) enum CliCommand {
     #[command(
         name = "migration",
         visible_alias = "make:migration",
@@ -32,6 +32,30 @@ pub(crate) enum Command {
         about = "Scaffold and register a new Rusty CLI command"
     )]
     MakeCommand(CommandArgs),
+
+    #[command(
+        name = "make:view",
+        about = "Scaffold and register an external HTML page view"
+    )]
+    MakeView(ViewArgs),
+
+    #[command(
+        name = "make:controller",
+        about = "Scaffold and register a web presentation controller"
+    )]
+    MakeController(ControllerArgs),
+
+    #[command(
+        name = "make:view-model",
+        about = "Scaffold and register a serializable web view model"
+    )]
+    MakeViewModel(ViewModelArgs),
+
+    #[command(
+        name = "make:page",
+        about = "Scaffold a complete public HTML-first GET page"
+    )]
+    MakePage(PageArgs),
 
     #[command(name = "doctor", about = "Inspect the Rusty CLI project environment")]
     Doctor,
@@ -70,6 +94,50 @@ pub(crate) struct TestArgs {
     /// Example: rusty make:test --view web/pages/contacts
     #[arg(long, conflicts_with = "name")]
     pub(crate) view: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ViewArgs {
+    /// View path relative to resources/views/pages, e.g. dashboard/index.
+    pub(crate) path: String,
+
+    /// Show what would be generated without changing files.
+    #[arg(long)]
+    pub(crate) dry_run: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ControllerArgs {
+    /// Controller name, e.g. Dashboard or AdminDashboard.
+    pub(crate) name: String,
+
+    /// Show what would be generated without changing files.
+    #[arg(long)]
+    pub(crate) dry_run: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ViewModelArgs {
+    /// View-model name, e.g. Dashboard or AdminDashboard.
+    pub(crate) name: String,
+
+    /// Show what would be generated without changing files.
+    #[arg(long)]
+    pub(crate) dry_run: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct PageArgs {
+    /// Page name, e.g. Dashboard or AdminDashboard.
+    pub(crate) name: String,
+
+    /// Static public GET route, e.g. /dashboard.
+    #[arg(long)]
+    pub(crate) path: String,
+
+    /// Show the complete scaffold plan without changing files.
+    #[arg(long)]
+    pub(crate) dry_run: bool,
 }
 
 #[derive(Debug, Args)]

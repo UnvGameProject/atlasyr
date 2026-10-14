@@ -1,0 +1,79 @@
+name: Production Gate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-gate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release-gate:
+    name: Release gate
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Verify Docker runtime
+        run: |
+          set -euo pipefail
+          docker version
+          docker compose version
+
+      - name: Create ephemeral Docker secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          install \
+            -d \
+            -m 0700 \
+            .secrets
+
+          python3 - <<'PY'
+          from pathlib import Path
+          from secrets import token_hex
+
+          root = Path(".secrets")
+
+          for name in [
+              "postgres_bootstrap_password",
+              "postgres_migrator_password",
+              "postgres_app_password",
+              "postgres_test_password",
+          ]:
+              path = root / name
+              path.write_text(
+                  token_hex(24) + "\n"
+              )
+              path.chmod(0o644)
+          PY
+
+      - name: Run production release gate
+        run: ./release-gate
+
+      - name: Cleanup containers and ephemeral secrets
+        if: always()
+        shell: bash
+        run: |
+          docker compose \
+            --profile test \
+            down \
+            --volumes \
+            --remove-orphans \
+            || true
+
+          rm \
+            -rf \
+            .secrets

@@ -1,13 +1,13 @@
 use clap::Parser;
 
-use super::{Cli, Command};
+use super::{Cli, CliCommand};
 
 #[test]
 fn make_test_accepts_existing_module_form() {
     let cli = Cli::try_parse_from(["rusty", "make:test", "domain/contact", "create"])
         .expect("normal make:test syntax should parse");
 
-    let Command::MakeTest(args) = cli.command else {
+    let CliCommand::MakeTest(args) = cli.command else {
         panic!("expected make:test command");
     };
 
@@ -21,7 +21,7 @@ fn make_test_view_accepts_module_without_test_name() {
     let cli = Cli::try_parse_from(["rusty", "make:test", "--view", "web/pages/contacts"])
         .expect("--view syntax should parse without a test name");
 
-    let Command::MakeTest(args) = cli.command else {
+    let CliCommand::MakeTest(args) = cli.command else {
         panic!("expected make:test command");
     };
 
@@ -54,5 +54,118 @@ fn make_test_view_rejects_test_name() {
 fn audit_command_parses() {
     let cli = Cli::try_parse_from(["rusty", "audit"]).expect("audit command should parse");
 
-    assert!(matches!(cli.command, Command::Audit));
+    assert!(matches!(cli.command, CliCommand::Audit));
+}
+
+#[test]
+fn make_view_accepts_page_path() {
+    let cli = Cli::try_parse_from(["rusty", "make:view", "dashboard/index"])
+        .expect("make:view syntax should parse");
+
+    let CliCommand::MakeView(args) = cli.command else {
+        panic!("expected make:view command");
+    };
+
+    assert_eq!(args.path, "dashboard/index",);
+
+    assert!(!args.dry_run,);
+}
+
+#[test]
+fn make_view_accepts_dry_run() {
+    let cli = Cli::try_parse_from(["rusty", "make:view", "dashboard/index", "--dry-run"])
+        .expect("make:view --dry-run should parse");
+
+    let CliCommand::MakeView(args) = cli.command else {
+        panic!("expected make:view command");
+    };
+
+    assert!(args.dry_run,);
+}
+
+#[test]
+fn make_controller_accepts_name() {
+    let cli = Cli::try_parse_from(["rusty", "make:controller", "Dashboard"])
+        .expect("make:controller syntax should parse");
+
+    let CliCommand::MakeController(args) = cli.command else {
+        panic!("expected make:controller command");
+    };
+
+    assert_eq!(args.name, "Dashboard",);
+
+    assert!(!args.dry_run,);
+}
+
+#[test]
+fn make_controller_accepts_dry_run() {
+    let cli = Cli::try_parse_from(["rusty", "make:controller", "Dashboard", "--dry-run"])
+        .expect("make:controller --dry-run should parse");
+
+    let CliCommand::MakeController(args) = cli.command else {
+        panic!("expected make:controller command");
+    };
+
+    assert!(args.dry_run,);
+}
+
+#[test]
+fn make_view_model_accepts_name() {
+    let cli = Cli::try_parse_from(["rusty", "make:view-model", "Dashboard"])
+        .expect("make:view-model syntax should parse");
+
+    let CliCommand::MakeViewModel(args) = cli.command else {
+        panic!("expected make:view-model command");
+    };
+
+    assert_eq!(args.name, "Dashboard",);
+
+    assert!(!args.dry_run,);
+}
+
+#[test]
+fn make_view_model_accepts_dry_run() {
+    let cli = Cli::try_parse_from(["rusty", "make:view-model", "Dashboard", "--dry-run"])
+        .expect("make:view-model --dry-run should parse");
+
+    let CliCommand::MakeViewModel(args) = cli.command else {
+        panic!("expected make:view-model command");
+    };
+
+    assert!(args.dry_run,);
+}
+
+#[test]
+fn make_page_accepts_name_and_path() {
+    let cli = Cli::try_parse_from(["rusty", "make:page", "Dashboard", "--path", "/dashboard"])
+        .expect("make:page syntax should parse");
+
+    let CliCommand::MakePage(args) = cli.command else {
+        panic!("expected make:page command");
+    };
+
+    assert_eq!(args.name, "Dashboard",);
+
+    assert_eq!(args.path, "/dashboard",);
+
+    assert!(!args.dry_run,);
+}
+
+#[test]
+fn make_page_accepts_dry_run() {
+    let cli = Cli::try_parse_from([
+        "rusty",
+        "make:page",
+        "Dashboard",
+        "--path",
+        "/dashboard",
+        "--dry-run",
+    ])
+    .expect("make:page --dry-run should parse");
+
+    let CliCommand::MakePage(args) = cli.command else {
+        panic!("expected make:page command");
+    };
+
+    assert!(args.dry_run,);
 }

@@ -1,0 +1,122 @@
+<div class="card shadow-sm">
+    <div class="card-body p-4">
+        <h2 class="h4 mb-3">
+            Create contact
+        </h2>
+
+        <p class="text-body-secondary">
+            This form is authenticated, protected by Topcoat's
+            origin policy, and validated by the existing Contacts
+            application use case before persistence.
+        </p>
+
+        {% if form.success_message %}
+            <div
+                class="alert alert-success"
+                role="status"
+            >
+                {{ form.success_message }}
+            </div>
+        {% endif %}
+
+        {% if form.validation_message %}
+            <div
+                class="alert alert-warning"
+                role="alert"
+            >
+                {{ form.validation_message }}
+            </div>
+        {% endif %}
+
+        {% if form.error_message %}
+            <div
+                class="alert alert-danger"
+                role="alert"
+            >
+                {{ form.error_message }}
+            </div>
+        {% endif %}
+
+        <form
+            method="post"
+            action="/contacts/create"
+            hx-post="/contacts/create"
+            hx-target="#contacts-workspace"
+            hx-swap="outerHTML"
+            novalidate
+        >
+            <div class="mb-3">
+                <label
+                    class="form-label"
+                    for="contact-name"
+                >
+                    Name
+                </label>
+
+                <input
+                    id="contact-name"
+                    class="form-control{% if form.name_error %} is-invalid{% endif %}"
+                    type="text"
+                    name="name"
+                    value="{{ form.name }}"
+                    maxlength="200"
+                    autocomplete="name"
+                    required
+                    {% if form.name_error %}
+                        aria-invalid="true"
+                        aria-describedby="contact-name-error"
+                    {% endif %}
+                >
+
+                {% if form.name_error %}
+                    <div
+                        class="invalid-feedback d-block"
+                        id="contact-name-error"
+                    >
+                        {{ form.name_error }}
+                    </div>
+                {% endif %}
+            </div>
+
+            <div class="mb-3">
+                <label
+                    class="form-label"
+                    for="contact-email"
+                >
+                    Email
+                </label>
+
+                <input
+                    id="contact-email"
+                    class="form-control{% if form.email_error %} is-invalid{% endif %}"
+                    type="email"
+                    name="email"
+                    value="{{ form.email }}"
+                    maxlength="320"
+                    autocomplete="email"
+                    required
+                    {% if form.email_error %}
+                        aria-invalid="true"
+                        aria-describedby="contact-email-error"
+                    {% endif %}
+                >
+
+                {% if form.email_error %}
+                    <div
+                        class="invalid-feedback d-block"
+                        id="contact-email-error"
+                    >
+                        {{ form.email_error }}
+                    </div>
+                {% endif %}
+            </div>
+
+            <button
+                class="btn btn-primary"
+                type="submit"
+            >
+                Create contact
+            </button>
+        </form>
+    </div>
+</div>

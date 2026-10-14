@@ -21,6 +21,32 @@ async fn create_persists_validated_user(pool: PgPool) -> Result<(), sqlx::Error>
         .expect("user should be created");
 
     assert_eq!(user.email, "ada@example.com");
+    assert_eq!(user.role, "operator");
+
+    let persisted = User::find_by_id(&pool, user.id).await?;
+
+    assert_eq!(persisted, Some(user));
+
+    Ok(())
+}
+
+#[sqlx::test]
+async fn create_viewer_persists_viewer_role(pool: PgPool) -> Result<(), sqlx::Error> {
+    let input = CreateUserInput::from_untrusted("viewer@example.com")
+        .validate()
+        .expect("viewer input should be valid");
+
+    let user = User::create_viewer(
+        &pool,
+        &input,
+        hash_password("correct horse battery staple").expect("password should hash"),
+    )
+    .await
+    .expect("viewer should be created");
+
+    assert_eq!(user.email, "viewer@example.com",);
+
+    assert_eq!(user.role, "viewer");
 
     let persisted = User::find_by_id(&pool, user.id).await?;
 

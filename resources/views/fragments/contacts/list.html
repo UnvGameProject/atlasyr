@@ -1,0 +1,39 @@
+{% if contacts %}
+    <div class="card shadow-sm">
+        <div class="table-responsive">
+            <table class="table table-striped align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th scope="col">
+                            Name
+                        </th>
+
+                        <th scope="col">
+                            Email
+                        </th>
+
+                        {% if can_update or can_delete %}
+                            <th
+                                class="text-end"
+                                scope="col"
+                            >
+                                Actions
+                            </th>
+                        {% endif %}
+                    </tr>
+                </thead>
+
+                {% for row in contacts %}
+                    {% include "fragments/contacts/row.html" %}
+                {% endfor %}
+            </table>
+        </div>
+    </div>
+{% else %}
+    <div
+        class="alert alert-secondary"
+        role="status"
+    >
+        No contacts have been created yet.
+    </div>
+{% endif %}

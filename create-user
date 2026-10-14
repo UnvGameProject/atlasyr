@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+(
+set -euo pipefail
+set +x
+
+if [ "$#" -ne 2 ]; then
+    echo "Usage: ./create-user <email> <viewer|operator>" >&2
+    exit 2
+fi
+
+email="$1"
+role="$2"
+
+case "$role" in
+    viewer|operator)
+        ;;
+
+    *)
+        echo 'Role must be exactly "viewer" or "operator".' >&2
+        exit 2
+        ;;
+esac
+
+password=''
+confirmation=''
+
+cleanup() {
+    unset password confirmation
+}
+
+trap cleanup EXIT
+
+IFS= read \
+    -r \
+    -s \
+    -p "Password: " \
+    password
+
+printf '\n'
+
+IFS= read \
+    -r \
+    -s \
+    -p "Confirm password: " \
+    confirmation
+
+printf '\n'
+
+if [ "$password" != "$confirmation" ]; then
+    echo "Passwords do not match." >&2
+    exit 1
+fi
+
+if [ -z "$password" ]; then
+    echo "Password must not be empty." >&2
+    exit 1
+fi
+
+printf '%s\n' "$password" |
+    docker compose run \
+        --rm \
+        -T \
+        app \
+        cargo run \
+        --quiet \
+        --locked \
+        --bin create-user \
+        -- \
+        "$email" \
+        "$role"
+)

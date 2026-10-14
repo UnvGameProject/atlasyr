@@ -1,0 +1,34 @@
+{% extends "layouts/app.html" %}
+
+{% block title %}Contacts | Atlasyr{% endblock %}
+
+{% block content %}
+<main class="container py-5">
+    <div
+        class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4"
+    >
+        <div>
+            <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+                <span class="badge rounded-pill text-bg-info">
+                    Contacts - HTML-first
+                </span>
+
+                <span class="text-secondary small">
+                    Protected Topcoat routes | htmx | MiniJinja | Existing application use cases
+                </span>
+            </div>
+
+            <h1 class="mb-1">
+                Contacts
+            </h1>
+
+            <p class="text-body-secondary mb-0">
+                HTML-first Contacts rendering with progressive enhancement.
+            </p>
+        </div>
+
+    </div>
+
+    {% include "fragments/contacts/workspace.html" %}
+</main>
+{% endblock %}

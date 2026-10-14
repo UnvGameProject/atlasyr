@@ -47,7 +47,7 @@ pub(crate) fn run(args: CommandArgs) -> CommandResult {
         )?,
         DISPATCH_MARKER,
         &format!(
-            "        Command::{} => {}::run(),",
+            "        CliCommand::{} => {}::run(),",
             names.variant, names.module,
         ),
     )?;
@@ -201,7 +201,7 @@ fn ensure_not_registered(
         ));
     }
 
-    let variant_needle = format!("Command::{}", names.variant);
+    let variant_needle = format!("CliCommand::{}", names.variant);
 
     if commands_mod.contains(&variant_needle) {
         return Err(io::Error::new(

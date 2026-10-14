@@ -11,6 +11,7 @@ use crate::auth::password::PasswordHash;
 pub(crate) struct User {
     pub(crate) id: Uuid,
     pub(crate) email: String,
+    pub(crate) role: String,
     pub(crate) created_at: OffsetDateTime,
     pub(crate) updated_at: OffsetDateTime,
 }
@@ -25,6 +26,7 @@ pub(super) struct UserRow {
     pub(super) id: Uuid,
     pub(super) email: String,
     pub(super) password_hash: String,
+    pub(super) role: String,
     pub(super) created_at: OffsetDateTime,
     pub(super) updated_at: OffsetDateTime,
 }
@@ -51,6 +53,7 @@ impl UserRow {
             user: User {
                 id: self.id,
                 email: self.email,
+                role: self.role,
                 created_at: self.created_at,
                 updated_at: self.updated_at,
             },

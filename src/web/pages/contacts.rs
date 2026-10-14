@@ -1,223 +1,328 @@
-use topcoat::{
-    Result,
-    context::Cx,
-    router::page,
-    runtime::{Event, signal},
-    view::{View, view},
+use crate::{
+    application::authorization::{
+        AuthorizationActor, ContactsCreateGrant, ContactsDeleteGrant, ContactsReadGrant,
+        ContactsUpdateGrant, load_authorization_actor,
+    },
+    auth::require_auth,
 };
 
-use self::{create::create_contact, list::contact_list};
+use serde::Deserialize;
+use sqlx::PgPool;
+use topcoat::{
+    Result,
+    asset::asset_config,
+    context::{Cx, app_context},
+    htmx::hx_request,
+    router::{
+        content::Form,
+        error::{RouterErrorExt, internal_server_error, see_other},
+        page,
+    },
+    view::View,
+};
 
-mod create;
-mod delete;
-mod list;
-mod row;
-#[cfg(test)]
-mod tests;
-mod update;
-mod validation;
+use crate::web::{
+    ViewRenderer,
+    assets::{APP_CSS, BOOTSTRAP_JS, HTMX_JS, PLAIN_CSS},
+    controllers,
+    view_models::{ContactDeletedView, ContactRowFragmentView, ContactsPresentationAccess},
+    views::{CONTACTS_DELETED, CONTACTS_INDEX, CONTACTS_LIST, CONTACTS_ROW, CONTACTS_WORKSPACE},
+};
+
+topcoat::router::path_param!(contact_id);
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ContactCreateForm {
+    name: String,
+    email: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ContactUpdateForm {
+    id: String,
+    name: String,
+    email: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ContactDeleteForm {
+    id: String,
+
+    // Legacy presentation snapshots remain in the submitted form contract for
+    // this slice but never enter DeleteContactCommand or internal-error
+    // reporting. A later form cleanup may remove them independently.
+    name: String,
+    email: String,
+}
+
+/// Resolve request authentication into the current application authorization
+/// actor.
+///
+/// No session/token representation crosses this boundary. If the authenticated
+/// user disappeared between session resolution and account lookup, the request
+/// no longer has a usable principal and fails as unauthorized.
+async fn require_authorization_actor(cx: &Cx, pool: &PgPool) -> Result<AuthorizationActor> {
+    let identity = require_auth(cx).await?;
+
+    let actor = load_authorization_actor(pool, identity.user_id())
+        .await
+        .map_err(internal_server_error)?;
+
+    Ok(actor.ok_or_unauthorized()?)
+}
+
+/// Project application authorization into rendering hints only.
+///
+/// These booleans improve UX but authorize nothing. Every operation remains
+/// independently protected by the opaque application grants from POC 4C.
+fn contacts_presentation_access(actor: AuthorizationActor) -> ContactsPresentationAccess {
+    ContactsPresentationAccess::new(
+        actor.contacts_create().is_some(),
+        actor.contacts_update().is_some(),
+        actor.contacts_delete().is_some(),
+    )
+}
+
+#[page("/contacts/list")]
+async fn contacts_list_html(cx: &Cx) -> Result<impl View> {
+    let pool = app_context::<PgPool>(cx);
+
+    let actor = require_authorization_actor(cx, pool).await?;
+    let presentation_access = contacts_presentation_access(actor);
+    let read_access: ContactsReadGrant = actor.contacts_read().ok_or_forbidden()?;
+
+    let model = controllers::contacts::list(pool, read_access, presentation_access)
+        .await
+        .map_err(internal_server_error)?;
+
+    let renderer = app_context::<ViewRenderer>(cx);
+
+    let rendered = renderer.render(CONTACTS_LIST, &model)?;
+
+    Ok(rendered.into_view(cx))
+}
+
+#[page("/contacts/{contact_id}/row")]
+async fn contacts_row_html(cx: &Cx) -> Result<impl View> {
+    let pool = app_context::<PgPool>(cx);
+
+    let actor = require_authorization_actor(cx, pool).await?;
+    let presentation_access = contacts_presentation_access(actor);
+    let read_access: ContactsReadGrant = actor.contacts_read().ok_or_forbidden()?;
+
+    let id: &str = topcoat::router::path_param::<ContactId>(cx);
+
+    let row = controllers::contacts::row(pool, read_access, id)
+        .await
+        .map_err(internal_server_error)?;
+
+    let renderer = app_context::<ViewRenderer>(cx);
+
+    let model = ContactRowFragmentView::new(presentation_access, row);
+
+    let rendered = renderer.render(CONTACTS_ROW, &model)?;
+
+    Ok(rendered.into_view(cx))
+}
+
+#[page(POST "/contacts/create")]
+async fn contacts_create_html(cx: &Cx, Form(input): Form<ContactCreateForm>) -> Result<impl View> {
+    let pool = app_context::<PgPool>(cx);
+
+    let actor = require_authorization_actor(cx, pool).await?;
+    let presentation_access = contacts_presentation_access(actor);
+
+    let create_access: ContactsCreateGrant = actor.contacts_create().ok_or_forbidden()?;
+
+    let read_access: ContactsReadGrant = actor.contacts_read().ok_or_forbidden()?;
+
+    let result = controllers::contacts::create(
+        pool,
+        create_access,
+        read_access,
+        presentation_access,
+        input.name,
+        input.email,
+    )
+    .await
+    .map_err(internal_server_error)?;
+
+    let renderer = app_context::<ViewRenderer>(cx);
+
+    if hx_request(cx) {
+        let rendered = renderer.render(CONTACTS_WORKSPACE, result.workspace())?;
+
+        return Ok(rendered.into_view(cx));
+    }
+
+    if result.succeeded() {
+        return Err(see_other("/contacts").into());
+    }
+
+    let workspace = result.into_workspace();
+
+    let assets = asset_config(cx);
+
+    let model = controllers::contacts::index_with_workspace(
+        assets.resolve(APP_CSS),
+        assets.resolve(PLAIN_CSS),
+        assets.resolve(BOOTSTRAP_JS),
+        assets.resolve(HTMX_JS),
+        workspace,
+    );
+
+    let rendered = renderer.render(CONTACTS_INDEX, &model)?;
+
+    Ok(rendered.into_view(cx))
+}
+
+#[page(POST "/contacts/update")]
+async fn contacts_update_html(cx: &Cx, Form(input): Form<ContactUpdateForm>) -> Result<impl View> {
+    let pool = app_context::<PgPool>(cx);
+
+    let actor = require_authorization_actor(cx, pool).await?;
+    let presentation_access = contacts_presentation_access(actor);
+
+    let update_access: ContactsUpdateGrant = actor.contacts_update().ok_or_forbidden()?;
+
+    let read_access: ContactsReadGrant = actor.contacts_read().ok_or_forbidden()?;
+
+    let result = controllers::contacts::update(
+        pool,
+        update_access,
+        read_access,
+        input.id,
+        input.name,
+        input.email,
+    )
+    .await
+    .map_err(internal_server_error)?;
+
+    let renderer = app_context::<ViewRenderer>(cx);
+
+    if hx_request(cx) {
+        let model = ContactRowFragmentView::new(presentation_access, result.into_row());
+
+        let rendered = renderer.render(CONTACTS_ROW, &model)?;
+
+        return Ok(rendered.into_view(cx));
+    }
+
+    if result.succeeded() {
+        return Err(see_other("/contacts").into());
+    }
+
+    let row = result.into_row();
+
+    let workspace =
+        controllers::contacts::workspace_with_row(pool, read_access, presentation_access, row)
+            .await
+            .map_err(internal_server_error)?;
+
+    let assets = asset_config(cx);
+
+    let model = controllers::contacts::index_with_workspace(
+        assets.resolve(APP_CSS),
+        assets.resolve(PLAIN_CSS),
+        assets.resolve(BOOTSTRAP_JS),
+        assets.resolve(HTMX_JS),
+        workspace,
+    );
+
+    let rendered = renderer.render(CONTACTS_INDEX, &model)?;
+
+    Ok(rendered.into_view(cx))
+}
+
+#[page(POST "/contacts/delete")]
+async fn contacts_delete_html(cx: &Cx, Form(input): Form<ContactDeleteForm>) -> Result<impl View> {
+    let pool = app_context::<PgPool>(cx);
+
+    let actor = require_authorization_actor(cx, pool).await?;
+    let presentation_access = contacts_presentation_access(actor);
+
+    let delete_access: ContactsDeleteGrant = actor.contacts_delete().ok_or_forbidden()?;
+
+    let read_access: ContactsReadGrant = actor.contacts_read().ok_or_forbidden()?;
+
+    let result =
+        controllers::contacts::delete(pool, delete_access, input.id, input.name, input.email)
+            .await
+            .map_err(internal_server_error)?;
+
+    let renderer = app_context::<ViewRenderer>(cx);
+
+    if hx_request(cx) {
+        let rendered = match result {
+            controllers::contacts::ContactDeleteResult::Deleted => {
+                renderer.render(CONTACTS_DELETED, &ContactDeletedView::new())?
+            }
+
+            controllers::contacts::ContactDeleteResult::Row(row) => renderer.render(
+                CONTACTS_ROW,
+                &ContactRowFragmentView::new(presentation_access, row),
+            )?,
+        };
+
+        return Ok(rendered.into_view(cx));
+    }
+
+    let row = match result {
+        controllers::contacts::ContactDeleteResult::Deleted => {
+            return Err(see_other("/contacts").into());
+        }
+
+        controllers::contacts::ContactDeleteResult::Row(row) => row,
+    };
+
+    let workspace =
+        controllers::contacts::workspace_with_row(pool, read_access, presentation_access, row)
+            .await
+            .map_err(internal_server_error)?;
+
+    let assets = asset_config(cx);
+
+    let model = controllers::contacts::index_with_workspace(
+        assets.resolve(APP_CSS),
+        assets.resolve(PLAIN_CSS),
+        assets.resolve(BOOTSTRAP_JS),
+        assets.resolve(HTMX_JS),
+        workspace,
+    );
+
+    let rendered = renderer.render(CONTACTS_INDEX, &model)?;
+
+    Ok(rendered.into_view(cx))
+}
 
 #[page("/contacts")]
-async fn contacts(cx: &Cx) -> Result<impl View> {
-    let name = signal(cx, String::new);
-    let email = signal(cx, String::new);
-    let status = signal(cx, String::new);
-    let name_error = signal(cx, String::new);
-    let email_error = signal(cx, String::new);
-    let refresh = signal(cx, || 0.0);
+async fn contacts_html(cx: &Cx) -> Result<impl View> {
+    let pool = app_context::<PgPool>(cx);
 
-    Ok(view! {
-        <main class="container py-5">
-            <div class="d-flex justify-content-between align-items-center mb-4">
-                <div>
-                    <h1 class="mb-1">"Contacts"</h1>
-                    <p class="text-body-secondary mb-0">
-                        "Topcoat + SQLx contact workflow"
-                    </p>
-                </div>
+    let actor = require_authorization_actor(cx, pool).await?;
+    let presentation_access = contacts_presentation_access(actor);
+    let read_access: ContactsReadGrant = actor.contacts_read().ok_or_forbidden()?;
 
-                <a class="btn btn-outline-secondary" href="/">
-                    "Home"
-                </a>
-            </div>
+    let assets = asset_config(cx);
 
-            <div class="row g-4">
-                <section class="col-lg-5">
-                    <div class="card shadow-sm">
-                        <div class="card-body p-4">
-                            <h2 class="h4 mb-3">"Create contact"</h2>
+    let model = controllers::contacts::index(
+        pool,
+        read_access,
+        presentation_access,
+        assets.resolve(APP_CSS),
+        assets.resolve(PLAIN_CSS),
+        assets.resolve(BOOTSTRAP_JS),
+        assets.resolve(HTMX_JS),
+    )
+    .await
+    .map_err(internal_server_error)?;
 
-                            <p class="text-body-secondary">
-                                "This form submits through a Topcoat procedure and is validated on the server before persistence."
-                            </p>
+    let renderer = app_context::<ViewRenderer>(cx);
 
-                            <div
-                                class="alert alert-info"
-                                role="status"
-                                :hidden=$(status.get() != "submitting")
-                            >
-                                "Creating contact..."
-                            </div>
+    let rendered = renderer.render(CONTACTS_INDEX, &model)?;
 
-                            <div
-                                class="alert alert-success"
-                                role="status"
-                                :hidden=$(status.get() != "created")
-                            >
-                                "Contact created successfully."
-                            </div>
-
-                            <div
-                                class="alert alert-warning"
-                                role="alert"
-                                :hidden=$(status.get() != "validation")
-                            >
-                                "Please correct the highlighted fields."
-                            </div>
-
-                            <div
-                                class="alert alert-danger"
-                                role="alert"
-                                :hidden=$(status.get() != "error")
-                            >
-                                "The contact could not be created."
-                            </div>
-
-                            <form
-                                novalidate=""
-                                @submit=$(async |e: Event| {
-                                    e.prevent_default();
-
-                                    name_error.set("".to_owned());
-                                    email_error.set("".to_owned());
-                                    status.set("submitting".to_owned());
-
-                                    let outcome =
-                                        create_contact(name.get(), email.get()).await;
-
-                                    if outcome == "validation_name" {
-                                        name_error.set(
-                                            "Name is required and must be 200 characters or fewer."
-                                                .to_owned()
-                                        );
-                                        status.set("validation".to_owned());
-                                    }
-
-                                    if outcome == "validation_email" {
-                                        email_error.set(
-                                            "Enter a valid email address no longer than 320 characters."
-                                                .to_owned()
-                                        );
-                                        status.set("validation".to_owned());
-                                    }
-
-                                    if outcome == "validation_both" {
-                                        name_error.set(
-                                            "Name is required and must be 200 characters or fewer."
-                                                .to_owned()
-                                        );
-                                        email_error.set(
-                                            "Enter a valid email address no longer than 320 characters."
-                                                .to_owned()
-                                        );
-                                        status.set("validation".to_owned());
-                                    }
-
-                                    if outcome == "duplicate" {
-                                        email_error.set(
-                                            "A contact with this email address already exists."
-                                                .to_owned()
-                                        );
-                                        status.set("validation".to_owned());
-                                    }
-
-                                    if outcome == "created" {
-                                        name.set("".to_owned());
-                                        email.set("".to_owned());
-                                        refresh.increment();
-                                        status.set("created".to_owned());
-                                    }
-
-                                    if outcome == "error" {
-                                        status.set("error".to_owned());
-                                    }
-                                })
-                            >
-                                <div class="mb-3">
-                                    <label
-                                        class="form-label"
-                                        for="contact-name"
-                                    >
-                                        "Name"
-                                    </label>
-
-                                    <input
-                                        id="contact-name"
-                                        class="form-control"
-                                        type="text"
-                                        name="name"
-                                        autocomplete="name"
-                                        :value=$(name.get())
-                                        @input=$(|e: Event| {
-                                            name.set(e.target.value);
-                                        })
-                                    >
-
-                                    <div
-                                        class="invalid-feedback d-block"
-                                        :hidden=$(name_error.get() == "")
-                                    >
-                                        $(name_error.get())
-                                    </div>
-                                </div>
-
-                                <div class="mb-3">
-                                    <label
-                                        class="form-label"
-                                        for="contact-email"
-                                    >
-                                        "Email"
-                                    </label>
-
-                                    <input
-                                        id="contact-email"
-                                        class="form-control"
-                                        type="email"
-                                        name="email"
-                                        autocomplete="email"
-                                        :value=$(email.get())
-                                        @input=$(|e: Event| {
-                                            email.set(e.target.value);
-                                        })
-                                    >
-
-                                    <div
-                                        class="invalid-feedback d-block"
-                                        :hidden=$(email_error.get() == "")
-                                    >
-                                        $(email_error.get())
-                                    </div>
-                                </div>
-
-                                <button
-                                    class="btn btn-primary"
-                                    type="submit"
-                                >
-                                    "Create contact"
-                                </button>
-                            </form>
-                        </div>
-                    </div>
-                </section>
-
-                <section class="col-lg-7">
-                    <div class="d-flex align-items-center justify-content-between mb-3">
-                        <h2 class="h4 mb-0">"Existing contacts"</h2>
-                    </div>
-
-                    contact_list(refresh: $(refresh))
-                </section>
-            </div>
-        </main>
-    })
+    Ok(rendered.into_view(cx))
 }

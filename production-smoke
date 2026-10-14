@@ -1,0 +1,1175 @@
+#!/usr/bin/env bash
+(
+set -euo pipefail
+
+PROJECT_ROOT="$(
+    CDPATH= cd -- "$(dirname -- "$0")" &&
+    pwd
+)"
+
+cd "$PROJECT_ROOT"
+
+APP_IMAGE='atlasyr-production-app:smoke'
+MIGRATE_IMAGE='atlasyr-production-migrate:smoke'
+CREATE_USER_IMAGE='atlasyr-production-create-user:smoke'
+
+RUNTIME_HARDENING=(
+    --read-only
+    --cap-drop ALL
+    --security-opt no-new-privileges=true
+)
+
+APP_CONTAINER='atlasyr-production-smoke-app'
+
+TEMP_DIR="$(
+    mktemp -d
+)"
+
+cleanup() {
+    docker rm \
+        --force \
+        "$APP_CONTAINER" \
+        >/dev/null 2>&1 \
+        || true
+
+    rm -rf "$TEMP_DIR"
+}
+
+trap cleanup EXIT HUP INT TERM
+
+compose() {
+    docker compose \
+        --project-directory "$PROJECT_ROOT" \
+        -f "$PROJECT_ROOT/compose.yaml" \
+        "$@"
+}
+
+printf '\n===== BUILD PRODUCTION TARGETS =====\n'
+
+docker build \
+    --file Dockerfile.prod \
+    --target app \
+    --tag "$APP_IMAGE" \
+    .
+
+docker build \
+    --file Dockerfile.prod \
+    --target migrate \
+    --tag "$MIGRATE_IMAGE" \
+    .
+
+docker build \
+    --file Dockerfile.prod \
+    --target create-user \
+    --tag "$CREATE_USER_IMAGE" \
+    .
+
+printf '\n===== VERIFY IMAGE USERS + ENTRYPOINTS =====\n'
+
+test "$(
+    docker image inspect \
+        --format '{{.Config.User}}' \
+        "$APP_IMAGE"
+)" = '10001:10001'
+
+test "$(
+    docker image inspect \
+        --format '{{.Config.User}}' \
+        "$MIGRATE_IMAGE"
+)" = '10001:10001'
+
+test "$(
+    docker image inspect \
+        --format '{{.Config.User}}' \
+        "$CREATE_USER_IMAGE"
+)" = '10001:10001'
+
+test "$(
+    docker image inspect \
+        --format '{{json .Config.Entrypoint}}' \
+        "$APP_IMAGE"
+)" = '["/app/atlasyr"]'
+
+test "$(
+    docker image inspect \
+        --format '{{json .Config.Entrypoint}}' \
+        "$MIGRATE_IMAGE"
+)" = '["/app/migrate"]'
+
+test "$(
+    docker image inspect \
+        --format '{{json .Config.Entrypoint}}' \
+        "$CREATE_USER_IMAGE"
+)" = '["/app/create-user"]'
+
+printf '%s\n' \
+    'production targets use the dedicated non-root runtime identity'
+
+
+test "$(
+    docker image inspect \
+        --format '{{.Config.StopSignal}}' \
+        "$APP_IMAGE"
+)" = 'SIGTERM'
+
+test "$(
+    docker image inspect \
+        --format '{{json .Config.Healthcheck}}' \
+        "$APP_IMAGE"
+)" = 'null'
+
+printf '%s\n' \
+    'production application image declares SIGTERM and no image-local healthcheck'
+
+printf '\n===== VERIFY PACKAGED ARTIFACT OWNERSHIP =====\n'
+
+for IMAGE in \
+    "$APP_IMAGE" \
+    "$MIGRATE_IMAGE" \
+    "$CREATE_USER_IMAGE"
+do
+    docker run \
+        "${RUNTIME_HARDENING[@]}" \
+        --rm \
+        --entrypoint /bin/sh \
+        "$IMAGE" \
+        -c '
+            set -eu
+
+            NON_ROOT_OWNED="$(
+                find /app \
+                    -xdev \
+                    \( \
+                        ! -user root \
+                        -o ! -group root \
+                    \) \
+                    -print \
+                    -quit
+            )"
+
+            test -z "$NON_ROOT_OWNED"
+
+            WRITABLE_MODE="$(
+                find /app \
+                    -xdev \
+                    -perm /022 \
+                    -print \
+                    -quit
+            )"
+
+            test -z "$WRITABLE_MODE"
+        '
+done
+
+printf '%s\n' \
+    'production artifacts are root-owned and not group/other writable'
+
+printf '\n===== VERIFY APP IMAGE PACKAGE SURFACE =====\n'
+
+docker run \
+    "${RUNTIME_HARDENING[@]}" \
+    --rm \
+    --entrypoint /bin/sh \
+    "$APP_IMAGE" \
+    -c '
+        set -eu
+
+        test "$(id -u)" = 10001
+        test "$(id -g)" = 10001
+
+        test -x /app/atlasyr
+        test -s /app/assets/manifest.toml
+        test -d /app/resources/views
+
+        test "$(
+            find /app/resources/views \
+                -type f \
+                | wc -l
+        )" -eq 9
+
+        for command in \
+            cargo \
+            rustc \
+            rustup \
+            topcoat \
+            node \
+            npm
+        do
+            if command -v "$command" >/dev/null 2>&1; then
+                printf "ERROR: build tool present in app image: %s\n" \
+                    "$command" >&2
+                exit 1
+            fi
+        done
+
+        for path in \
+            /app/src \
+            /app/crates \
+            /app/tests \
+            /app/tools \
+            /app/docker \
+            /app/migrations \
+            /app/.sqlx \
+            /app/.secrets \
+            /app/node_modules \
+            /app/Cargo.toml \
+            /app/Cargo.lock \
+            /app/package.json \
+            /app/package-lock.json \
+            /app/Dockerfile.dev \
+            /app/Dockerfile.prod \
+            /app/compose.yaml \
+            /app/deny.toml \
+            /app/dependency-audit
+        do
+            if [ -e "$path" ]; then
+                printf "ERROR: development artifact present: %s\n" \
+                    "$path" >&2
+                exit 1
+            fi
+        done
+
+        test ! -e /app/migrate
+        test ! -e /app/create-user
+
+        printf "%s\n" \
+            "app runtime package surface is minimal"
+    '
+
+printf '\n===== VERIFY OPERATIONAL TARGET ISOLATION =====\n'
+
+docker run \
+    "${RUNTIME_HARDENING[@]}" \
+    --rm \
+    --entrypoint /bin/sh \
+    "$MIGRATE_IMAGE" \
+    -c '
+        set -eu
+
+        test -x /app/migrate
+        test ! -e /app/atlasyr
+        test ! -e /app/create-user
+        test ! -e /app/assets
+        test ! -e /app/resources
+        test ! -e /app/migrations
+
+        printf "%s\n" \
+            "migration target contains no application presentation package"
+    '
+
+docker run \
+    "${RUNTIME_HARDENING[@]}" \
+    --rm \
+    --entrypoint /bin/sh \
+    "$CREATE_USER_IMAGE" \
+    -c '
+        set -eu
+
+        test -x /app/create-user
+        test ! -e /app/atlasyr
+        test ! -e /app/migrate
+        test ! -e /app/assets
+        test ! -e /app/resources
+        test ! -e /app/migrations
+
+        printf "%s\n" \
+            "create-user target contains no application presentation package"
+    '
+
+printf '\n===== VERIFY APP DYNAMIC LIBRARIES RESOLVE =====\n'
+
+docker run \
+    "${RUNTIME_HARDENING[@]}" \
+    --rm \
+    --entrypoint /usr/bin/ldd \
+    "$APP_IMAGE" \
+    /app/atlasyr \
+    | tee "$TEMP_DIR/ldd.txt"
+
+if grep -q 'not found' "$TEMP_DIR/ldd.txt"; then
+    printf '%s\n' \
+        'ERROR: unresolved production runtime library' >&2
+    exit 1
+fi
+
+printf '\n===== VERIFY PRODUCTION DEFAULTS =====\n'
+
+docker image inspect \
+    "$APP_IMAGE" \
+    > "$TEMP_DIR/app-image.json"
+
+python3 - "$TEMP_DIR/app-image.json" <<'PY'
+from pathlib import Path
+import json
+import sys
+
+data = json.loads(
+    Path(sys.argv[1]).read_text()
+)
+
+environment = set(
+    data[0]["Config"].get("Env") or []
+)
+
+required = {
+    "APP_ENV=production",
+    "AUTH_DRIVER=local-topcoat",
+    "HOST=0.0.0.0",
+    "PORT=3000",
+}
+
+missing = required - environment
+
+if missing:
+    raise SystemExit(
+        "production image defaults missing: "
+        + ", ".join(sorted(missing))
+    )
+
+print("production application defaults verified")
+PY
+
+
+if docker image inspect \
+    "$APP_IMAGE" \
+    --format '{{range .Config.Env}}{{println .}}{{end}}' \
+    | grep -q '^TRUSTED_PROXY_NETWORKS='
+then
+    printf '%s\n' \
+        'ERROR: production image must not trust proxies by default' >&2
+    exit 1
+fi
+
+printf '%s\n' \
+    'production image defaults to no trusted proxy networks'
+
+printf '\n===== VERIFY PACKAGED ASSET BUNDLE =====\n'
+
+docker run \
+    "${RUNTIME_HARDENING[@]}" \
+    --rm \
+    --entrypoint /bin/sh \
+    "$APP_IMAGE" \
+    -c '
+        set -eu
+
+        test -s /app/assets/manifest.toml
+
+        count="$(
+            find /app/assets \
+                -maxdepth 1 \
+                -type f \
+                ! -name manifest.toml \
+                | wc -l
+        )"
+
+        test "$count" -ge 4
+
+        printf "bundled asset files: %s\n" "$count"
+    '
+
+printf '\n===== START DATABASE FOR RUNTIME SMOKE =====\n'
+
+compose up -d postgres
+
+POSTGRES_ID="$(
+    compose ps -q postgres
+)"
+
+test -n "$POSTGRES_ID"
+
+NETWORK="$(
+    docker inspect "$POSTGRES_ID" |
+        python3 -c '
+import json
+import sys
+
+data = json.load(sys.stdin)
+
+networks = list(
+    data[0]["NetworkSettings"]["Networks"]
+)
+
+if len(networks) != 1:
+    raise SystemExit(
+        "expected postgres to have exactly one compose network, "
+        f"found {networks}"
+    )
+
+print(networks[0])
+'
+)"
+
+test -n "$NETWORK"
+
+test -r "$PROJECT_ROOT/.secrets/postgres_migrator_password"
+test -r "$PROJECT_ROOT/.secrets/postgres_app_password"
+
+printf 'compose network: %s\n' "$NETWORK"
+
+printf '\n===== RUN PRODUCTION MIGRATION ARTIFACT =====\n'
+
+docker run \
+    "${RUNTIME_HARDENING[@]}" \
+    --rm \
+    --network "$NETWORK" \
+    --env DB_HOST=postgres \
+    --env DB_PORT=5432 \
+    --env DB_NAME=atlasyr \
+    --env DB_USER=atlasyr_migrator \
+    --env DB_PASSWORD_FILE=/run/secrets/database_password \
+    --mount \
+        "type=bind,src=$PROJECT_ROOT/.secrets/postgres_migrator_password,dst=/run/secrets/database_password,readonly" \
+    "$MIGRATE_IMAGE"
+
+printf '%s\n' \
+    'production migration artifact executed successfully'
+
+printf '\n===== VERIFY HARDENED CREATE-USER ARTIFACT =====\n'
+
+set +e
+
+printf '%s\n' \
+    'container-hardening-smoke-password' \
+    | docker run \
+        "${RUNTIME_HARDENING[@]}" \
+        --interactive \
+        --rm \
+        --network "$NETWORK" \
+        --env DB_HOST=postgres \
+        --env DB_PORT=5432 \
+        --env DB_NAME=atlasyr \
+        --env DB_USER=atlasyr_migrator \
+        --env DB_PASSWORD_FILE=/run/secrets/database_password \
+        --mount \
+            "type=bind,src=$PROJECT_ROOT/.secrets/postgres_migrator_password,dst=/run/secrets/database_password,readonly" \
+        "$CREATE_USER_IMAGE" \
+        not-an-email \
+        viewer \
+        >"$TEMP_DIR/create-user-validation.log" \
+        2>&1
+
+CREATE_USER_STATUS=$?
+
+set -e
+
+test "$CREATE_USER_STATUS" -ne 0
+
+grep -Fq \
+    'email address is invalid' \
+    "$TEMP_DIR/create-user-validation.log"
+
+if grep -Fq \
+    'container-hardening-smoke-password' \
+    "$TEMP_DIR/create-user-validation.log"
+then
+    printf '%s\n' \
+        'ERROR: create-user output exposed password input' >&2
+    exit 1
+fi
+
+printf '%s\n' \
+    'create-user reaches application validation under hardened runtime without persisting a smoke user'
+
+printf '\n===== START PRODUCTION APPLICATION IMAGE =====\n'
+
+docker rm \
+    --force \
+    "$APP_CONTAINER" \
+    >/dev/null 2>&1 \
+    || true
+
+docker run \
+    "${RUNTIME_HARDENING[@]}" \
+    --detach \
+    --name "$APP_CONTAINER" \
+    --network "$NETWORK" \
+    --publish 127.0.0.1::3000 \
+    --env DB_HOST=postgres \
+    --env DB_PORT=5432 \
+    --env DB_NAME=atlasyr \
+    --env DB_USER=atlasyr_app \
+    --env DB_PASSWORD_FILE=/run/secrets/database_password \
+    --mount \
+        "type=bind,src=$PROJECT_ROOT/.secrets/postgres_app_password,dst=/run/secrets/database_password,readonly" \
+    "$APP_IMAGE" \
+    >/dev/null
+
+HOST_PORT="$(
+    docker inspect \
+        --format '{{(index (index .NetworkSettings.Ports "3000/tcp") 0).HostPort}}' \
+        "$APP_CONTAINER"
+)"
+
+test -n "$HOST_PORT"
+
+printf 'production smoke port: %s\n' "$HOST_PORT"
+
+printf '\n===== VERIFY APPLICATION SERVES HTTP =====\n'
+
+READY=0
+
+for _ in $(seq 1 60); do
+    RUNNING="$(
+        docker inspect \
+            --format '{{.State.Running}}' \
+            "$APP_CONTAINER"
+    )"
+
+    if [ "$RUNNING" != 'true' ]; then
+        printf '%s\n' \
+            'ERROR: production application exited during startup' >&2
+
+        docker logs "$APP_CONTAINER" >&2 || true
+        exit 1
+    fi
+
+    if python3 - "$HOST_PORT" <<'PY' >/dev/null 2>&1
+from urllib.request import urlopen
+import sys
+
+with urlopen(
+    f"http://127.0.0.1:{sys.argv[1]}/",
+    timeout=1,
+) as response:
+    if response.status != 200:
+        raise SystemExit(1)
+PY
+    then
+        READY=1
+        break
+    fi
+
+    sleep 0.25
+done
+
+if [ "$READY" -ne 1 ]; then
+    printf '%s\n' \
+        'ERROR: production application never served the public home page' >&2
+
+    docker logs "$APP_CONTAINER" >&2 || true
+    exit 1
+fi
+
+printf '%s\n' \
+    'production application served the public home page'
+
+
+printf '\n===== VERIFY LIVENESS / READINESS / REQUEST TELEMETRY =====\n'
+
+HEALTH_QUERY_SECRET='health-query-must-not-be-logged'
+
+LIVE_BODY="$(
+    curl \
+        --fail \
+        --silent \
+        --show-error \
+        "http://127.0.0.1:${HOST_PORT}/health/live?probe=${HEALTH_QUERY_SECRET}"
+)"
+
+test "$LIVE_BODY" = 'live'
+
+READY_BODY="$(
+    curl \
+        --fail \
+        --silent \
+        --show-error \
+        "http://127.0.0.1:${HOST_PORT}/health/ready"
+)"
+
+test "$READY_BODY" = 'ready'
+
+docker logs \
+    "$APP_CONTAINER" \
+    >"$TEMP_DIR/health-observability.log" \
+    2>&1
+
+grep -Eq \
+    '^request_event method=GET route=/health/live client_ip=[^ ]+ status=200 outcome=ok duration_ms=[0-9]+$' \
+    "$TEMP_DIR/health-observability.log"
+
+grep -Eq \
+    '^request_event method=GET route=/health/ready client_ip=[^ ]+ status=200 outcome=ok duration_ms=[0-9]+$' \
+    "$TEMP_DIR/health-observability.log"
+
+if grep -Fq \
+    "$HEALTH_QUERY_SECRET" \
+    "$TEMP_DIR/health-observability.log"
+then
+    printf '%s\n' \
+        'ERROR: operational request telemetry exposed a query-string value' >&2
+    exit 1
+fi
+
+grep -Fq \
+    'application_event kind=server_starting shutdown_timeout_secs=30' \
+    "$TEMP_DIR/health-observability.log"
+
+printf '%s\n' \
+    'liveness and readiness endpoints serve independently scoped health checks'
+
+printf '%s\n' \
+    'operational request telemetry uses matched routes without query strings'
+
+printf '\n===== VERIFY LIVE CONTAINER HARDENING =====\n'
+
+docker inspect \
+    "$APP_CONTAINER" \
+    | python3 -c '
+import json
+import sys
+
+data = json.load(sys.stdin)
+
+if len(data) != 1:
+    raise SystemExit(
+        f"expected one application container, found {len(data)}"
+    )
+
+host = data[0]["HostConfig"]
+
+if host.get("ReadonlyRootfs") is not True:
+    raise SystemExit(
+        "production application root filesystem is not read-only"
+    )
+
+cap_drop = host.get("CapDrop") or []
+
+if sorted(
+    value.upper()
+    for value in cap_drop
+) != ["ALL"]:
+    raise SystemExit(
+        f"unexpected capability drop contract: {cap_drop!r}"
+    )
+
+security_opt = host.get("SecurityOpt") or []
+
+if "no-new-privileges=true" not in security_opt:
+    raise SystemExit(
+        f"no-new-privileges is missing: {security_opt!r}"
+    )
+
+tmpfs = host.get("Tmpfs")
+
+if tmpfs not in (None, {}):
+    raise SystemExit(
+        f"unexpected writable tmpfs surface: {tmpfs!r}"
+    )
+
+print(
+    "container host config: read-only rootfs, "
+    "cap-drop ALL, no-new-privileges, no tmpfs"
+)
+'
+
+docker exec \
+    "$APP_CONTAINER" \
+    /bin/sh \
+    -c '
+        set -eu
+
+        test "$(
+            awk \
+                "/^NoNewPrivs:/ { print \$2 }" \
+                /proc/1/status
+        )" = 1
+
+        for FIELD in \
+            CapInh \
+            CapPrm \
+            CapEff \
+            CapBnd \
+            CapAmb
+        do
+            VALUE="$(
+                awk \
+                    -v field="$FIELD:" \
+                    "\$1 == field { print \$2 }" \
+                    /proc/1/status
+            )"
+
+            test "$VALUE" = 0000000000000000
+        done
+    '
+
+printf '%s\n' \
+    'live application process has NoNewPrivs=1 and zero capability sets'
+
+printf '\n===== VERIFY PACKAGED APPLICATION CANNOT MUTATE =====\n'
+
+if docker exec \
+    "$APP_CONTAINER" \
+    /bin/sh \
+    -c '
+        touch /app/production-smoke-should-not-write
+    ' \
+    >/dev/null 2>&1
+then
+    printf '%s\n' \
+        'ERROR: hardened application mutated packaged /app content' >&2
+    exit 1
+fi
+
+printf '%s\n' \
+    'read-only production filesystem rejects application writes'
+
+
+printf '\n===== VERIFY FORWARDED ADDRESS IS UNTRUSTED BY DEFAULT =====\n'
+
+FORWARDED_PROOF_IP='198.51.100.77'
+
+UNTRUSTED_STATUS="$(
+    curl \
+        --silent \
+        --show-error \
+        --output /dev/null \
+        --write-out '%{http_code}' \
+        --header "X-Forwarded-For: $FORWARDED_PROOF_IP" \
+        "http://127.0.0.1:${HOST_PORT}/contacts/list"
+)"
+
+test "$UNTRUSTED_STATUS" = '401'
+
+docker logs \
+    "$APP_CONTAINER" \
+    >"$TEMP_DIR/untrusted-forwarded.log" \
+    2>&1
+
+UNTRUSTED_EVENT="$(
+    grep \
+        'security_event kind=request_unauthorized' \
+        "$TEMP_DIR/untrusted-forwarded.log" \
+        | grep \
+            'route=/contacts/list' \
+        | tail -n 1
+)"
+
+test -n "$UNTRUSTED_EVENT"
+
+if printf '%s\n' \
+    "$UNTRUSTED_EVENT" \
+    | grep -Fq \
+        "client_ip=$FORWARDED_PROOF_IP"
+then
+    printf '%s\n' \
+        'ERROR: untrusted X-Forwarded-For changed client identity' >&2
+    exit 1
+fi
+
+DIRECT_PEER_IP="$(
+    printf '%s\n' \
+        "$UNTRUSTED_EVENT" \
+        | sed -n \
+            's/.* client_ip=\([^ ]*\) user_id=.*/\1/p'
+)"
+
+test -n "$DIRECT_PEER_IP"
+test "$DIRECT_PEER_IP" != '-'
+test "$DIRECT_PEER_IP" != "$FORWARDED_PROOF_IP"
+
+python3 \
+    -c 'import ipaddress, sys; ipaddress.ip_address(sys.argv[1])' \
+    "$DIRECT_PEER_IP"
+
+printf 'direct peer client IP: %s\n' \
+    "$DIRECT_PEER_IP"
+
+printf '%s\n' \
+    'untrusted forwarded client address was ignored'
+
+printf '\n===== VERIFY PACKAGED ASSET IS SERVED =====\n'
+
+BUNDLED_ASSETS="$TEMP_DIR/bundled-assets.txt"
+
+docker run \
+    "${RUNTIME_HARDENING[@]}" \
+    --rm \
+    --entrypoint /bin/sh \
+    "$APP_IMAGE" \
+    -c '
+        set -eu
+
+        sed -n \
+            "s/^file = \"\(.*\)\"/\1/p" \
+            /app/assets/manifest.toml
+    ' \
+    > "$BUNDLED_ASSETS"
+
+test -s "$BUNDLED_ASSETS"
+
+python3 - "$HOST_PORT" "$BUNDLED_ASSETS" <<'PYASSET'
+from html.parser import HTMLParser
+from pathlib import Path, PurePosixPath
+from urllib.parse import unquote, urljoin, urlparse
+from urllib.request import urlopen
+import sys
+
+
+class AssetReferenceParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.references = []
+
+    def handle_starttag(self, tag, attrs):
+        for name, value in attrs:
+            if (
+                name in {"href", "src"}
+                and value
+            ):
+                self.references.append(value)
+
+
+port = sys.argv[1]
+
+bundled = {
+    line.strip()
+    for line in Path(sys.argv[2]).read_text().splitlines()
+    if line.strip()
+}
+
+if not bundled:
+    raise SystemExit(
+        "asset manifest contained no bundled filenames"
+    )
+
+base_url = f"http://127.0.0.1:{port}/"
+
+with urlopen(
+    base_url,
+    timeout=3,
+) as response:
+    if response.status != 200:
+        raise SystemExit(
+            f"home page returned {response.status}"
+        )
+
+    html = response.read().decode(
+        "utf-8",
+        errors="replace",
+    )
+
+parser = AssetReferenceParser()
+parser.feed(html)
+
+matches = []
+
+for reference in parser.references:
+    parsed = urlparse(reference)
+    filename = PurePosixPath(
+        unquote(parsed.path)
+    ).name
+
+    if filename in bundled:
+        matches.append(
+            (reference, filename)
+        )
+
+if not matches:
+    raise SystemExit(
+        "home page emitted no URL matching "
+        "a packaged Topcoat asset"
+    )
+
+unique_matches = list(
+    dict.fromkeys(matches)
+)
+
+for reference, filename in unique_matches:
+    url = urljoin(
+        base_url,
+        reference,
+    )
+
+    with urlopen(
+        url,
+        timeout=3,
+    ) as response:
+        if response.status != 200:
+            raise SystemExit(
+                f"asset returned {response.status}: {url}"
+            )
+
+        body = response.read()
+
+        if not body:
+            raise SystemExit(
+                f"asset response was empty: {url}"
+            )
+
+    print(
+        f"production asset served successfully: "
+        f"{reference} ({filename})"
+    )
+
+print(
+    "verified application-generated asset routes: "
+    f"{len(unique_matches)}"
+)
+PYASSET
+
+printf '\n===== VERIFY SIGTERM GRACEFUL SHUTDOWN =====\n'
+
+docker stop \
+    --time 35 \
+    "$APP_CONTAINER" \
+    >/dev/null
+
+APP_EXIT_CODE="$(
+    docker inspect \
+        --format '{{.State.ExitCode}}' \
+        "$APP_CONTAINER"
+)"
+
+APP_OOM_KILLED="$(
+    docker inspect \
+        --format '{{.State.OOMKilled}}' \
+        "$APP_CONTAINER"
+)"
+
+test "$APP_EXIT_CODE" = '0'
+test "$APP_OOM_KILLED" = 'false'
+
+docker logs \
+    "$APP_CONTAINER" \
+    >"$TEMP_DIR/graceful-shutdown.log" \
+    2>&1
+
+grep -Fq \
+    'application_event kind=shutdown_complete' \
+    "$TEMP_DIR/graceful-shutdown.log"
+
+docker rm \
+    "$APP_CONTAINER" \
+    >/dev/null
+
+printf '%s\n' \
+    'SIGTERM completed through Topcoat graceful shutdown with exit code 0'
+
+
+printf '\n===== VERIFY EXPLICIT TRUSTED PROXY CLIENT ADDRESS =====\n'
+
+docker run \
+    "${RUNTIME_HARDENING[@]}" \
+    --detach \
+    --name "$APP_CONTAINER" \
+    --network "$NETWORK" \
+    --publish 127.0.0.1::3000 \
+    --env DB_HOST=postgres \
+    --env DB_PORT=5432 \
+    --env DB_NAME=atlasyr \
+    --env DB_USER=atlasyr_app \
+    --env DB_PASSWORD_FILE=/run/secrets/database_password \
+    --env TRUSTED_PROXY_NETWORKS="$DIRECT_PEER_IP" \
+    --mount \
+        "type=bind,src=$PROJECT_ROOT/.secrets/postgres_app_password,dst=/run/secrets/database_password,readonly" \
+    "$APP_IMAGE" \
+    >/dev/null
+
+TRUSTED_HOST_PORT="$(
+    docker inspect \
+        --format '{{(index (index .NetworkSettings.Ports "3000/tcp") 0).HostPort}}' \
+        "$APP_CONTAINER"
+)"
+
+test -n "$TRUSTED_HOST_PORT"
+
+TRUSTED_READY=0
+
+for _ in $(seq 1 60); do
+    RUNNING="$(
+        docker inspect \
+            --format '{{.State.Running}}' \
+            "$APP_CONTAINER"
+    )"
+
+    if [ "$RUNNING" != 'true' ]; then
+        printf '%s\n' \
+            'ERROR: trusted-proxy application exited during startup' >&2
+
+        docker logs \
+            "$APP_CONTAINER" >&2 \
+            || true
+
+        exit 1
+    fi
+
+    if curl \
+        --fail \
+        --silent \
+        --show-error \
+        "http://127.0.0.1:${TRUSTED_HOST_PORT}/" \
+        >/dev/null 2>&1
+    then
+        TRUSTED_READY=1
+        break
+    fi
+
+    sleep 0.25
+done
+
+test "$TRUSTED_READY" -eq 1
+
+TRUSTED_STATUS="$(
+    curl \
+        --silent \
+        --show-error \
+        --output /dev/null \
+        --write-out '%{http_code}' \
+        --header "X-Forwarded-For: $FORWARDED_PROOF_IP" \
+        "http://127.0.0.1:${TRUSTED_HOST_PORT}/contacts/list"
+)"
+
+test "$TRUSTED_STATUS" = '401'
+
+docker logs \
+    "$APP_CONTAINER" \
+    >"$TEMP_DIR/trusted-forwarded.log" \
+    2>&1
+
+TRUSTED_EVENT="$(
+    grep \
+        'security_event kind=request_unauthorized' \
+        "$TEMP_DIR/trusted-forwarded.log" \
+        | grep \
+            'route=/contacts/list' \
+        | tail -n 1
+)"
+
+test -n "$TRUSTED_EVENT"
+
+printf '%s\n' \
+    "$TRUSTED_EVENT" \
+    | grep -Fq \
+        "client_ip=$FORWARDED_PROOF_IP"
+
+printf '%s\n' \
+    'trusted proxy forwarded client address was accepted'
+
+docker rm \
+    --force \
+    "$APP_CONTAINER" \
+    >/dev/null
+
+printf '\n===== INVALID TRUSTED PROXY CONFIG MUST FAIL STARTUP =====\n'
+
+set +e
+
+docker run \
+    "${RUNTIME_HARDENING[@]}" \
+    --rm \
+    --network "$NETWORK" \
+    --env DB_HOST=postgres \
+    --env DB_PORT=5432 \
+    --env DB_NAME=atlasyr \
+    --env DB_USER=atlasyr_app \
+    --env DB_PASSWORD_FILE=/run/secrets/database_password \
+    --env TRUSTED_PROXY_NETWORKS='not-a-network' \
+    --mount \
+        "type=bind,src=$PROJECT_ROOT/.secrets/postgres_app_password,dst=/run/secrets/database_password,readonly" \
+    "$APP_IMAGE" \
+    >"$TEMP_DIR/invalid-proxy-config.log" \
+    2>&1
+
+INVALID_PROXY_STATUS=$?
+
+set -e
+
+test "$INVALID_PROXY_STATUS" -ne 0
+
+grep -Fq \
+    'TRUSTED_PROXY_NETWORKS' \
+    "$TEMP_DIR/invalid-proxy-config.log"
+
+grep -Fq \
+    'not-a-network' \
+    "$TEMP_DIR/invalid-proxy-config.log"
+
+printf '%s\n' \
+    'invalid trusted-proxy configuration fails closed'
+
+printf '\n===== MISSING VIEW MUST FAIL STARTUP =====\n'
+
+EMPTY_VIEWS="$TEMP_DIR/empty-views"
+mkdir -p "$EMPTY_VIEWS"
+
+set +e
+
+docker run \
+    "${RUNTIME_HARDENING[@]}" \
+    --rm \
+    --network "$NETWORK" \
+    --env DB_HOST=postgres \
+    --env DB_PORT=5432 \
+    --env DB_NAME=atlasyr \
+    --env DB_USER=atlasyr_app \
+    --env DB_PASSWORD_FILE=/run/secrets/database_password \
+    --mount \
+        "type=bind,src=$PROJECT_ROOT/.secrets/postgres_app_password,dst=/run/secrets/database_password,readonly" \
+    --mount \
+        "type=bind,src=$EMPTY_VIEWS,dst=/app/resources/views,readonly" \
+    "$APP_IMAGE" \
+    >"$TEMP_DIR/missing-view.log" \
+    2>&1
+
+MISSING_VIEW_STATUS=$?
+
+set -e
+
+test "$MISSING_VIEW_STATUS" -ne 0
+
+grep -Eq \
+    'startup-validation|view .* failed|template' \
+    "$TEMP_DIR/missing-view.log"
+
+printf '%s\n' \
+    'missing production views fail closed during startup'
+
+printf '\n===== MISSING ASSET BUNDLE MUST FAIL STARTUP =====\n'
+
+EMPTY_ASSETS="$TEMP_DIR/empty-assets"
+mkdir -p "$EMPTY_ASSETS"
+
+set +e
+
+docker run \
+    "${RUNTIME_HARDENING[@]}" \
+    --rm \
+    --network "$NETWORK" \
+    --env DB_HOST=postgres \
+    --env DB_PORT=5432 \
+    --env DB_NAME=atlasyr \
+    --env DB_USER=atlasyr_app \
+    --env DB_PASSWORD_FILE=/run/secrets/database_password \
+    --mount \
+        "type=bind,src=$PROJECT_ROOT/.secrets/postgres_app_password,dst=/run/secrets/database_password,readonly" \
+    --mount \
+        "type=bind,src=$EMPTY_ASSETS,dst=/app/assets,readonly" \
+    "$APP_IMAGE" \
+    >"$TEMP_DIR/missing-assets.log" \
+    2>&1
+
+MISSING_ASSET_STATUS=$?
+
+set -e
+
+test "$MISSING_ASSET_STATUS" -ne 0
+
+grep -Fq \
+    'application_event kind=panic' \
+    "$TEMP_DIR/missing-assets.log"
+
+if grep -Eq \
+    'Topcoat asset bundle was not found|no asset bundle|panicked at' \
+    "$TEMP_DIR/missing-assets.log"
+then
+    printf '%s\n' \
+        'ERROR: production panic output exposed panic detail' >&2
+    exit 1
+fi
+
+printf '%s\n' \
+    'missing production asset bundle fails closed with sanitized panic telemetry'
+
+printf '\n===== PRODUCTION PACKAGE SMOKE GREEN =====\n'
+)

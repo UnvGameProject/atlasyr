@@ -1,0 +1,18 @@
+mod name;
+mod registry;
+mod rendered;
+mod renderer;
+
+pub(in crate::web) use name::ViewName;
+pub(in crate::web) use registry::{
+    CONTACTS_DELETED,
+    CONTACTS_INDEX,
+    CONTACTS_LIST,
+    CONTACTS_ROW,
+    CONTACTS_WORKSPACE,
+    HOME_INDEX,
+    VIEW_DX_DEMO,
+    // RUSTY_VIEW_EXPORTS
+};
+pub(in crate::web) use rendered::RenderedHtml;
+pub(crate) use renderer::ViewRenderer;
