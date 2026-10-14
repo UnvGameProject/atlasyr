@@ -1,27 +1,330 @@
+# Atlasyr
 
-# Topcoat POC
+**Rust at the core. Web without the detour.**
 
-A security-first, Dockerized proof of concept for evaluating **Topcoat** as a Rust frontend/full-stack framework against a mature **Laravel + Livewire-style** development baseline.
+Atlasyr is a production-oriented web application framework and platform for **Rust-centric systems**, built on [Topcoat](https://github.com/tokio-rs/topcoat).
 
-This repository is also intended to become a reusable GitHub template for future Topcoat applications if the framework proves suitable.
+Its purpose is not to replace Laravel, Rails, Django, or other mature general-purpose web frameworks. Atlasyr exists for a different center of gravity:
 
-## Purpose
+> **Use Atlasyr when the important part of your application is already Rust.**
 
-The goal is not simply to prove that Rust can render a web application.
+That includes systems where Rust is carrying domain logic, concurrency, low-latency services, computational workloads, financial infrastructure, blockchain or crypto infrastructure, realtime workloads, games, simulation, graphics, distributed systems, streaming data, or other capabilities that would be awkward to place behind a separate web stack written in another backend language.
 
-The POC is evaluating whether Topcoat can provide a productive, maintainable, and secure application-development experience while allowing an existing Rust-heavy backend to remain in Rust.
+Atlasyr keeps that Rust core intact while making the web-facing application layer secure, maintainable, productive, and accessible to ordinary frontend development.
 
-Laravel and mature industry implementations are used as reference points whenever Topcoat does not yet provide an equivalent built-in capability.
+## Project status
 
-The evaluation prioritizes:
+**Qualification complete. Product foundation begins here.**
 
-1. **Security**
-2. **Organization and maintainability**
-3. **Developer experience**
-4. **Framework maturity**
-5. **Operational simplicity**
-6. **Frontend flexibility**
-7. **Performance**
+The original Topcoat proof of concept completed its production-readiness qualification through POC 6 and reached an **Adopt With Constraints** decision for Rust-heavy application contexts.
+
+The frozen qualification checkpoint is:
+
+- branch baseline: `dx/contacts-architecture`
+- final qualification commit: `988ed1d`
+- release-gate tag: `production-release-gate-v1`
+- POC 6 closeout tag: `poc-6-production-readiness-v1`
+- pinned framework baseline: Topcoat `0.10.0`
+- Rust toolchain: `1.98.1`
+- application release gate: `./release-gate`
+
+The repository name and some historical terminology still reflect the qualification period. Product-transition work will rename and reorganize those surfaces deliberately rather than rewriting Git history.
+
+The post-qualification product roadmap lives in [`ROADMAP.md`](ROADMAP.md).
+
+## Built on Topcoat
+
+Atlasyr exists because Topcoat already provides substantial Rust web-framework machinery: routing, request context, sessions, cookies, assets, server rendering, client reactivity, procedures, shards, navigation, mail, and integrations such as htmx.
+
+Atlasyr is an **independent project built on Topcoat**. It is not an official Tokio or Topcoat project, and it must not obscure the work performed upstream.
+
+Topcoat receives explicit architectural credit because Atlasyr is not intended to fork or rebrand Topcoat's core framework work. Atlasyr adds a production application architecture, security conventions, HTML-first presentation option, developer tooling, deployment/release contracts, and Rust-heavy systems integrations around the upstream framework.
+
+The responsibility boundary is intentionally explicit:
+
+```text
+Topcoat
+    routing / request context / sessions / cookies
+    assets / rendering / runtime / procedures / shards
+    upstream browser integration and framework primitives
+        |
+        v
+Atlasyr
+    production application conventions
+    security and authorization policy
+    HTML-first presentation architecture
+    application/domain/persistence boundaries
+    Rusty developer tooling
+    release / deployment contracts
+    provider and systems integrations
+        |
+        v
+Application
+    domain-specific behavior
+    business rules
+    product UI
+    infrastructure choices
+```
+
+Generic improvements that belong naturally in Topcoat should be considered for upstream contribution rather than permanently duplicated inside Atlasyr.
+
+## Why Atlasyr exists
+
+A Rust-heavy team should not have to introduce an unrelated backend language merely because the system needs a browser interface.
+
+The problem Atlasyr is trying to solve is the architectural detour that often appears after a Rust backend becomes important enough to need a serious web surface:
+
+```text
+Rust domain / services / compute
+        |
+        | translation boundary
+        v
+different backend framework / language
+        |
+        v
+web application
+```
+
+Atlasyr instead aims for:
+
+```text
+Rust domain / services / compute
+        |
+        v
+Atlasyr application boundaries
+        |
+        +--> ordinary HTML / CSS / JavaScript / htmx
+        |
+        +--> native Topcoat reactivity when justified
+```
+
+The value is not merely faster HTTP. The stronger value is **continuity**:
+
+- Rust domain types can remain Rust domain types.
+- Tokio-based concurrency does not have to be translated into a second worker/runtime philosophy.
+- Rust libraries and internal crates can remain directly usable by the web application.
+- strongly typed authorization, validation, persistence, and application contracts can remain end to end.
+- high-performance compute and streaming capabilities can sit directly behind the web-facing application layer.
+- frontend specialists can still work in ordinary HTML, CSS, SCSS, JavaScript, and htmx without becoming advanced Rust developers.
+
+## Who Atlasyr is for
+
+Atlasyr is aimed primarily at:
+
+- Rust-first engineering teams that need a production web application around an existing Rust core;
+- fintech, trading, payments, and low-latency systems;
+- blockchain, crypto, and distributed-ledger applications;
+- realtime and message-driven systems;
+- systems using Tokio heavily for concurrency and asynchronous I/O;
+- game, simulation, geometry, media, or graphics workloads;
+- data-processing and streaming systems;
+- AI/ML infrastructure whose control plane or product surface needs a web layer;
+- globally distributed or multi-region systems;
+- applications that need to expose computational or infrastructure-heavy Rust capabilities safely to browsers or operators.
+
+Atlasyr can also support ordinary CRUD and business applications, but ordinary CRUD alone is not the reason for the framework to exist.
+
+## Who Atlasyr is not trying to replace
+
+If an application is primarily a conventional website, storefront, CMS, small-business application, or ordinary database-backed product with no meaningful Rust center of gravity, a mature general-purpose framework such as Laravel may still be the better choice.
+
+Laravel + Livewire remains an important quality reference for Atlasyr because it demonstrates what a mature framework can make safe, predictable, and fast:
+
+- authentication and authorization;
+- validation and forms;
+- sessions and browser security;
+- scaffolding and developer tooling;
+- testing;
+- background work;
+- deployment conventions;
+- common web application ergonomics.
+
+Atlasyr uses that maturity as a **bar**, not as a checklist to clone.
+
+The goal is not:
+
+> "Laravel, but in Rust."
+
+The goal is:
+
+> "A web framework that lets a Rust-centric system gain a serious web application without giving up the reasons the system chose Rust."
+
+## Product principles
+
+### 1. Rust-centric, not Rust-everywhere
+
+Rust should own the parts where Rust adds value. Ordinary markup and styling should remain ordinary markup and styling.
+
+HTML, CSS, SCSS, JavaScript, browser assets, and htmx interactions must remain approachable to frontend specialists who do not need to understand the application's deeper Rust internals.
+
+### 2. HTML-first, not HTML-only
+
+Atlasyr uses the least complicated interaction model that fits the job:
+
+```text
+ordinary HTML / CSS
+        |
+        v
+Bootstrap or ordinary JavaScript
+        |
+        v
+HTML-first server interaction such as htmx
+        |
+        v
+native Topcoat component / shard / procedure
+        |
+        v
+strongly typed reactive behavior when the extra machinery is justified
+```
+
+Native Topcoat remains a first-class capability. HTML-first presentation prevents the framework from forcing every ordinary page into Rust-authored reactive machinery.
+
+### 3. Core simplification before code generation
+
+Developer velocity must improve in two places:
+
+1. simplify repetitive framework APIs and application wiring;
+2. use Rusty to automate the mechanical work that still remains.
+
+Generating ten repetitive steps is useful. Designing the framework so only three steps are necessary is better.
+
+### 4. Security is an application property
+
+Rust memory safety is valuable, but it does not replace authentication, authorization, input validation, output escaping, secure sessions, origin policy, rate limiting, dependency auditing, secret handling, upload policy, audit history, production error handling, or deployment security.
+
+Atlasyr keeps those concerns explicit and testable.
+
+### 5. Upstream before duplication
+
+Topcoat is a moving target and remains pre-1.0. Atlasyr must expect upstream capabilities and APIs to change.
+
+Before Atlasyr builds or expands a cross-cutting capability, the project must ask:
+
+- Does Topcoat already provide it?
+- Is Topcoat actively building it?
+- Can Atlasyr use the upstream capability directly?
+- Is a narrow Atlasyr adapter sufficient?
+- Does Atlasyr have a genuinely different Rust-heavy use case that warrants an alternative?
+- If Atlasyr already owns an implementation, should it be migrated, retained as a selectable provider, or deprecated?
+
+### 6. Do not wrap Topcoat merely to hide Topcoat
+
+Atlasyr should not create a second framework API around every upstream API.
+
+A project-owned seam is justified when it provides one or more of:
+
+- stable application policy;
+- meaningful provider choice;
+- a security boundary;
+- a compatibility boundary around proven upstream churn;
+- a domain/application abstraction that should not depend on web-framework types.
+
+Where direct Topcoat usage is clear and stable, direct Topcoat usage is preferred.
+
+### 7. Mature infrastructure stays infrastructure
+
+Atlasyr should integrate with PostgreSQL, MongoDB, Redis, RabbitMQ, NATS, Kafka, object stores, tracing systems, and other mature infrastructure rather than reimplementing them.
+
+For example, Atlasyr may make MongoDB topology-aware access or shard/tenant routing easier, but MongoDB remains responsible for database sharding.
+
+### 8. Advanced Rust capabilities should remain composable
+
+A Rust pricing engine, blockchain client, simulation core, geometry library, Tokio service, or streaming engine should be able to plug into the application without being translated into another backend framework's internal model.
+
+### 9. Production behavior is part of the framework experience
+
+A web framework is not complete merely because it serves a page.
+
+Atlasyr treats dependency integrity, build reproducibility, production packaging, least privilege, health semantics, graceful shutdown, proxy/TLS contracts, telemetry, and release gates as product concerns.
+
+### 10. Evidence before abstraction
+
+New framework abstractions should come from repeated application pressure, not speculative architecture.
+
+The first post-qualification product milestone therefore measures a second real feature before Atlasyr expands Rusty or introduces broad new core abstractions.
+
+## Topcoat compatibility doctrine
+
+Topcoat compatibility is a permanent product function, not an occasional upgrade chore.
+
+Each Atlasyr capability should be classified in an upstream capability ledger as one of:
+
+| State | Meaning |
+| --- | --- |
+| **Topcoat-native** | Atlasyr uses the upstream feature directly. |
+| **Atlasyr adapter** | Atlasyr adds policy or a narrow compatibility seam around an upstream primitive. |
+| **Atlasyr-owned** | Atlasyr owns the capability because upstream does not provide it or the responsibility belongs at the application/platform layer. |
+| **Selectable provider** | Multiple implementations solve meaningfully different use cases and the application may choose. |
+| **Experimental** | The capability is being evaluated and is not yet part of the stable framework contract. |
+| **Deprecated / upstream-replaced** | Upstream now provides the preferred implementation; Atlasyr supplies a migration path and removes duplication deliberately. |
+
+For every Topcoat release considered for adoption, Atlasyr should review:
+
+1. release notes and breaking changes;
+2. Topcoat CLI/runtime version coupling;
+3. Rust/MSRV/toolchain changes;
+4. APIs Atlasyr consumes;
+5. security-sensitive behavior;
+6. sessions/cookies/request-context behavior;
+7. routing and middleware behavior;
+8. assets and runtime behavior;
+9. htmx and other browser integrations;
+10. production packaging/deployment implications;
+11. overlap with Atlasyr-owned capabilities;
+12. opportunities to delete or simplify Atlasyr code.
+
+Stable Atlasyr releases should pin a reviewed Topcoat version while Topcoat remains pre-1.0. Atlasyr's own versioning should remain independent, with an explicit compatibility matrix documenting which Topcoat versions each Atlasyr release has actually qualified.
+
+A non-release canary against Topcoat `main` is planned so likely breakage can be discovered before an upstream release rather than during an emergency upgrade.
+
+## Development velocity objective
+
+The qualification exercise rated current Atlasyr-style development velocity below the Laravel reference because significant framework plumbing had to be created during the POC.
+
+That score is **not** treated as permanent.
+
+The product target is to raise velocity for the intended Rust-heavy user without trading away type safety, explicit security boundaries, or maintainability.
+
+Work will focus on:
+
+- reducing repeated core wiring;
+- improving framework-owned adapters and error conversions;
+- making common application boundaries predictable;
+- expanding Rusty only where automation removes real repeated work;
+- measuring the before/after workflow on representative application features;
+- keeping ordinary frontend iteration independent from Rust rebuilds.
+
+The first major product milestone after upstream compatibility work is **Development Velocity v1**.
+
+## Roadmap
+
+The complete roadmap is maintained in [`ROADMAP.md`](ROADMAP.md).
+
+The sequence begins with:
+
+1. qualification closeout and product transition;
+2. permanent Topcoat upstream-sync / compatibility infrastructure;
+3. Development Velocity v1 using a representative second application feature;
+4. framework-core stabilization;
+5. secure web-application essentials;
+6. data/storage integrations;
+7. async, messaging, and realtime systems;
+8. observability and reliability;
+9. security and identity expansion;
+10. global/distributed-system capabilities;
+11. optional advanced compute, WASM, and WebGPU integration;
+12. provider ecosystem, distribution, documentation, and long-term maturity.
+
+Advanced capabilities are intentionally later than compatibility and developer-velocity work. Atlasyr should first become easy to evolve and easy to build with.
+
+## Working name
+
+**Atlasyr** is the current working product identity.
+
+The name preserves the "Atlas" idea of a load-bearing platform while avoiding the generic `Atlas-R` form. It is intended to sound like a distinct framework rather than an edition of Topcoat.
+
+This is a product-development name, not a claim of trademark, domain, package, or organization-name availability. Formal naming clearance is part of the product-transition roadmap before a public release.
+
 
 ## Getting started
 
@@ -187,7 +490,7 @@ grep -Fqx \
   'alias rusty="$HOME/projects/topcoat_poc/rusty"' \
   ~/.bashrc || cat >> ~/.bashrc <<'EOF'
 
-# Topcoat POC Rusty CLI
+# Atlasyr Rusty CLI
 alias rusty="$HOME/projects/topcoat_poc/rusty"
 EOF
 
@@ -263,25 +566,27 @@ docker compose logs -f assets
 Check formatting:
 
 ```bash
-cargo fmt --check
+cargo fmt --all -- --check
 ```
 
-Run Clippy with warnings treated as errors:
+Run Clippy diagnostics:
 
 ```bash
-cargo clippy --all-targets --all-features -- -D warnings
+cargo clippy --workspace --all-targets --all-features --locked
 ```
+
+The repository currently carries a small, explicitly tracked legacy Clippy warning baseline. The canonical `./release-gate` de-duplicates repeated all-target emissions and fails if that known warning set changes. Project-wide `-D warnings` is therefore not claimed as green until that legacy baseline is resolved.
 
 Run the same checks in Docker when needed:
 
 ```bash
-docker compose exec app cargo fmt --check
-docker compose exec app cargo clippy --all-targets --all-features -- -D warnings
+docker compose exec app cargo fmt --all -- --check
+docker compose exec app cargo clippy --workspace --all-targets --all-features --locked
 ```
 
 ### Testing
 
-The canonical project-wide test entrypoint is:
+The canonical application test entrypoint is:
 
 ```bash
 ./test
@@ -297,7 +602,11 @@ Docker test safety gate
 cargo test --locked --all-targets
 ```
 
-`cargo test` remains the underlying Rust test runner. Rusty does not execute tests; `rusty make:test` only scaffolds test files.
+`cargo test` remains the underlying Rust test runner. Rusty does not execute application tests; `rusty make:test` only scaffolds test files. The standalone Rusty CLI crate has its own regression suite:
+
+```bash
+cargo test --manifest-path tools/rusty-cli/Cargo.toml --locked
+```
 
 Pure unit tests can remain ordinary Rust tests with no database dependency. Persistence tests that require PostgreSQL use `#[sqlx::test]`.
 
@@ -313,6 +622,18 @@ The test architecture deliberately separates database authority:
 
 The first test run may compile the test target. The dedicated `/cargo-test-target` volume keeps that work cached, and the `postgres-test` server remains warm for subsequent runs. During the POC, the verified warm full-suite run completed in approximately 1.3 seconds.
 
+### Production release gate
+
+The canonical pre-release validation entrypoint is:
+
+```bash
+./release-gate
+```
+
+`./release-gate` composes the production-readiness matrix rather than duplicating those checks in CI. It verifies formatting, locked all-target compilation, the exact tracked Clippy warning baseline, application tests, the normal database/migration path, checked-in SQLx metadata, the standalone Rusty CLI regression suite, `./rusty audit`, dependency/supply-chain policy, production image/runtime smoke tests, and repository integrity.
+
+The GitHub Actions production workflow is intentionally thin and delegates to this same project-owned gate.
+
 ### Stop the project
 
 ```bash
@@ -327,7 +648,7 @@ docker compose down -v
 
 Use `-v` deliberately: it removes named volumes, including PostgreSQL development data and Cargo/Node caches.
 
-## Current status
+## Qualification evidence — historical POC baseline
 
 ### POC 0 — Green
 
@@ -336,7 +657,7 @@ The initial frontend/runtime baseline is working.
 Verified:
 
 - Rust 1.98.1 development toolchain
-- Topcoat 0.9.0
+- Topcoat 0.9.0 at the original POC 0 checkpoint; the repository baseline was subsequently upgraded to Topcoat 0.10.0
 - Dockerized development environment
 - direct Topcoat HTTP serving on localhost
 - server-side rendering
@@ -384,7 +705,7 @@ Verified:
 - separate warm `postgres-test` service
 - fail-closed database test safety gate
 - test-only ephemeral PostgreSQL storage
-- project-wide `./test` entrypoint
+- canonical application `./test` entrypoint
 - Rusty CLI standalone crate and Docker service
 - reversible migration, module-aware test, and command scaffolding
 - generated project files owned by the host developer rather than root
@@ -428,11 +749,11 @@ Public self-registration, password reset, email verification, and MFA are not pa
 
 Rusty now includes a project-local security/audit pass for important Rust input and persistence boundaries.
 
-The current checkpoint audits validated domain input, UUID parsing, credential verification, and persistence sink flows. At `auth-cleanup-final-v1`, the audit is clean with no warnings or errors.
+The current audit baseline covers validated domain input, UUID parsing, credential verification, persistence sink flows, dynamic SQL, shell execution, and related public-input boundaries. The production-readiness release run is green with no Rusty audit errors or warnings; the remaining finding is informational boundary evidence.
 
-### View/DX Architecture v1 — Runtime foundation green
+### View/DX Architecture v1 — Green baseline
 
-View/DX Architecture v1 is adopted, and its first real application slice is green.
+View/DX Architecture v1 is adopted and exercised through real application presentation rather than remaining a feasibility-only experiment.
 
 Verified in the repository:
 
@@ -445,16 +766,15 @@ Verified in the repository:
 - strict undefined-value behavior fails closed instead of silently rendering missing data
 - `|safe` is not used by application templates
 - development template reload uses MiniJinja autoreload support rather than rebuilding the Rust application for ordinary HTML edits
-- the public home page is rendered from `resources/views/pages/home/index.html`
-- the external home page uses `resources/views/layouts/app.html`
-- a real runtime HTML edit was observed on a subsequent request and restored without a Rust rebuild
-- the existing native Topcoat login and Contacts pages remain available under logical route groups without changing their public URLs
+- the public home page renders through the runtime-view architecture
+- HTML-first Contacts is the canonical and sole Contacts presentation surface under the established `/contacts/*` URLs
+- successful ordinary form mutations use POST/Redirect/GET semantics while htmx requests receive targeted fragments
 - unauthenticated HTTP behavior remains `/` = 200, `/login` = 200, `/contacts` = 401
-- native Topcoat remains available for interactions where its typed reactive model provides meaningful value
+- the native Topcoat login remains available at its established public URL
+- native Topcoat procedures, components, shards, signals, and other reactive capabilities remain available as opt-in tools where their typed reactive model provides meaningful value
+- Rusty provides `make:view`, `make:controller`, `make:view-model`, and atomic `make:page` scaffolding for the adopted HTML-first conventions
 
-The public home page was intentionally migrated first so the renderer foundation could be proven without disturbing Contacts, authentication mutations, or other security-sensitive application functionality.
-
-The runtime-mode hardening slice is also green. Renderer behavior is now selected explicitly through `APP_ENV` rather than Rust compilation profile:
+Renderer behavior is selected explicitly through `APP_ENV` rather than Rust compilation profile:
 
 - `development` uses MiniJinja autoreload and rich server-side diagnostics
 - `testing` uses a deterministic cached renderer with startup validation
@@ -462,21 +782,9 @@ The runtime-mode hardening slice is also green. Renderer behavior is now selecte
 - renderer failures return Topcoat's generic HTTP 500 response rather than exposing template source, filesystem paths, or internal model details
 - registered application views are validated through the project-owned view registry
 
-The first HTML-first htmx interaction is now green. The application pins and self-hosts htmx, exposes it through Topcoat's asset system, and serves a standalone MiniJinja fragment from `/view-dx/demo`. The route uses Topcoat's `hx_request` accessor only as request/presentation metadata; direct requests remain valid and `HX-Request` is not an authentication or authorization boundary.
+The application pins and self-hosts htmx 2.0.10 for HTML-first server interactions where partial DOM replacement is appropriate. `HX-Request` is treated only as request/presentation metadata and never as an authentication or authorization boundary.
 
-Contacts migration onto the HTML-first architecture now has a protected full-page read path plus a protected htmx list-fragment path. `/view-dx/contacts` renders through a typed MiniJinja page model, while `/view-dx/contacts/list` renders the same `fragments/contacts/list.html` fragment used by the full page. Both paths reuse the existing `application::contacts::list_contacts` query, and every externally callable Contacts read route independently enforces authentication. The native `/contacts` CRUD workflow remains unchanged.
-
-Contact creation is now available through the HTML-first path as the first htmx mutation. `POST /view-dx/contacts/create` uses Topcoat's typed form extractor, independently enforces authentication, remains protected by Topcoat's default cross-origin mutation policy, and reuses the existing `CreateContactCommand` / `create_contact` application use case. Validation and duplicate-email outcomes are mapped into typed presentation state; htmx receives the Contacts workspace fragment while ordinary form submission receives the full Contacts page. The native `/contacts` CRUD workflow remains available as the control implementation.
-
-Contact update is now available through the HTML-first path. Each contact renders through a reusable `fragments/contacts/row.html` fragment, htmx update requests replace only the affected contact `<tbody>`, and ordinary form submission retains a full-page fallback. The update HTTP route independently enforces authentication and Topcoat's default cross-origin mutation protection while reusing the existing `UpdateContactCommand` / `update_contact` application use case. Validation, duplicate-email, not-found, and success outcomes are mapped into typed row presentation state. A focused `find_contact` application query now provides single-contact reads without exposing persistence to the web layer. During migration, the native Topcoat row used the existing `#[procedure]` update path, demonstrating that native procedures and HTML/htmx transports could coexist over the same application use case.
-
-Contact delete is now available through the HTML-first path, completing CRUD parity for Contacts. The delete flow requires explicit confirmation, independently enforces authentication and Topcoat's default cross-origin mutation protection, and reuses the existing ID-only `DeleteContactCommand` / `delete_contact` application use case. Successful htmx deletion removes only the affected contact fragment, while not-found and infrastructure failures remain row-local; ordinary form submission retains a full-page fallback. Presentation-only name/email snapshots are used solely to reconstruct a row if persistence itself fails and never enter the delete application command. During migration, the native Topcoat delete path remained available through its existing `#[procedure]` implementation.
-
-HTML-first Contacts is the canonical and sole Contacts presentation surface. Its list, row, create, update, and delete endpoints all live under `/contacts/*`; the temporary `/view-dx/contacts*` migration routes remain retired rather than being retained as duplicate mutation aliases. Existing application navigation and successful login flows target `/contacts`. The temporary `/native/contacts` control route has now been retired after CRUD parity, canonical routing, and progressive-enhancement behavior were established; `view-contacts-prg-v1` is the rollback point immediately before native Contacts retirement.
-
-Contacts progressive enhancement now uses POST/Redirect/GET semantics for successful ordinary form mutations. Successful non-htmx create, update, and delete requests return Topcoat's framework-native `303 See Other` response targeting `/contacts`, preventing browser refresh from replaying mutation POSTs. htmx requests continue to receive the same workspace or row fragments as before, while validation, duplicate-email, not-found, and infrastructure-error outcomes continue rendering their typed error state without redirecting.
-
-The temporary native Contacts presentation has now been retired together with its Contacts-specific compiled view, component, shard, and procedure tree after dependency recon confirmed those modules had no consumers outside the control implementation. This does not retire native Topcoat as an application capability: procedures, components, shards, signals, and other reactive features remain valid opt-in tools wherever their model provides value. Rusty view scaffolding and broader frontend-source reorganization remain separate later slices.
+The Contacts migration proved that full-page HTML, htmx fragments, ordinary form fallbacks, typed application use cases, authentication, authorization, validation, and persistence can coexist behind stable public routes. Temporary `/view-dx/contacts*` migration routes and the `/native/contacts` control surface were retired after CRUD parity and progressive-enhancement behavior were established. `view-contacts-prg-v1` remains the rollback point immediately before native Contacts retirement.
 
 ## Current stack
 
@@ -530,6 +838,9 @@ The frontend architecture must remain compatible with standards-based HTML/CSS/J
 - separate PostgreSQL bootstrap, migration, runtime, and test credentials
 - `tmpfs` masking of repository `.secrets/` inside bind-mounted containers
 - ephemeral `tmpfs` storage for the isolated test PostgreSQL cluster
+- hardened production application, migration, and create-user images
+- canonical `./release-gate` production-readiness matrix
+- thin GitHub Actions production gate that delegates to the project-owned release gate
 
 ## Rust toolchain
 
@@ -674,7 +985,7 @@ This is deliberately not an instruction to replace Topcoat with htmx. Native Top
 
 MiniJinja 2.24.0 is the View/DX Architecture v1 runtime renderer.
 
-The decision is based on the completed renderer investigation and the first real application slice: external HTML renders through Topcoat, ordinary HTML edits can be observed without a Rust rebuild, typed Rust view models remain on the server side, HTML values are escaped by default, and renderer failures remain ordinary application errors rather than Rust compiler failures.
+The decision is based on the completed renderer investigation and subsequent real application slices: external HTML renders through Topcoat, ordinary HTML edits can be observed without a Rust rebuild, typed Rust view models remain on the server side, HTML values are escaped by default, and renderer failures remain ordinary application errors rather than Rust compiler failures.
 
 The application accesses MiniJinja through the narrow project-owned `ViewRenderer` boundary rather than spreading renderer-specific APIs throughout web code. Tera also passed the earlier feasibility experiments and remains useful comparison evidence, but it is not the v1 renderer.
 
@@ -692,7 +1003,7 @@ Required invariants:
 - development reload behavior must not weaken production view integrity; only the explicit `development` environment enables filesystem autoreload
 - browser action identifiers and values remain untrusted input
 - authorization, validation, and business rules remain server-authoritative
-- production uses a fixed application-owned view root, disables rich template debug formatting, and validates registered views at startup; deployment packaging/read-only filesystem policy remains an operational concern
+- production uses a fixed application-owned view root, disables rich template debug formatting, validates registered views at startup, and packages those views into the hardened read-only production runtime verified by `production-smoke`
 
 ### Rusty responsibility
 
@@ -800,6 +1111,8 @@ Current responsibilities include:
 - dry-run command-generation previews
 - deterministic generator markers for Rusty's command enum, module registry, and dispatcher
 - project-local Rust security/audit rules for public input, validation/UUID parsing, credential verification, dynamic SQL, shell execution, and persistence sink flows
+- View/DX scaffolding for views, presentation controllers, view models, and complete public GET pages
+- atomic `make:page` preflight/refusal behavior and dry-run support
 
 The default reversible migration convention is:
 
@@ -836,13 +1149,14 @@ and updates module registration as needed.
 
 `rusty make:command` is the Rust equivalent of an Artisan-style command scaffolder. It creates a new command source module and registers the corresponding CLI enum variant and dispatcher entry. `--dry-run` should be used when previewing a new command name or generator mapping.
 
-### Planned Rusty commands
+### Potential Rusty extensions
 
 Future Rusty work should only be added where it materially improves project consistency or development velocity.
 
-The next planned areas are:
+The View/DX scaffolding baseline is already implemented through `make:view`, `make:controller`, `make:view-model`, and `make:page`.
 
-- View/DX scaffolding after the renderer and interaction conventions are proven through real application slices
+Remaining candidate areas are:
+
 - PostgreSQL-backed model generation/synchronization using real database metadata
 - additional consistency/diagnostic commands only where they provide clear value
 
@@ -1000,11 +1314,13 @@ application-wide. At minimum, that route must:
   bodies, malformed multipart input, filename/path traversal attempts,
   content-type mismatches, and storage cleanup as applicable.
 
-Topcoat 0.9's `Multipart` extractor is suitable as the transport primitive for
-such a route: it can stream fields and applies the request's effective
-`BodyLimit` across the multipart stream. Those framework protections do not
-replace the application-level filename, content-validation, authorization,
-storage, and lifecycle rules above.
+Topcoat 0.9's `Multipart` extractor was verified during the earlier
+upload-policy investigation as a streaming transport primitive that applied the
+request's effective `BodyLimit` across the multipart stream. The repository now
+targets Topcoat 0.10.0, so a future upload implementation must revalidate those
+transport semantics against the pinned current Topcoat API before relying on
+them. Framework multipart protections do not replace the application-level
+filename, content-validation, authorization, storage, and lifecycle rules above.
 
 ## Rate-limiting policy
 
@@ -1092,9 +1408,10 @@ edge/shared-store design.
 
 Anonymous/global traffic shaping and volumetric abuse protection belong
 primarily at the production ingress/reverse-proxy boundary, where connection
-identity, deployment topology, and aggregate traffic are visible. That
-infrastructure policy will be finalized with POC 6 rather than approximated
-inside the application before the proxy contract exists.
+identity, deployment topology, and aggregate traffic are visible. POC 6
+finalized the application-side contract: the application does not approximate a
+globally authoritative edge quota, and deployment-specific traffic-shaping
+policy remains an ingress/operations responsibility.
 
 ## Production error-handling policy
 
@@ -1503,7 +1820,7 @@ Pure logic should use ordinary Rust unit tests whenever no database is required.
 
 Database-backed persistence behavior uses `#[sqlx::test]` against the isolated test PostgreSQL server.
 
-The canonical complete-suite command is:
+The canonical complete application-suite command is:
 
 ```bash
 ./test
@@ -1588,19 +1905,25 @@ cargo check --locked
 Formatting:
 
 ```bash
-cargo fmt --check
+cargo fmt --all -- --check
 ```
 
 Linting:
 
 ```bash
-cargo clippy --all-targets --all-features -- -D warnings
+cargo clippy --workspace --all-targets --all-features --locked
 ```
 
-Run the complete safe project test suite:
+Run the complete safe application test suite:
 
 ```bash
 ./test
+```
+
+Run the full production-readiness matrix:
+
+```bash
+./release-gate
 ```
 
 Inspect all containers, including the warm test database:
@@ -1614,6 +1937,7 @@ Rusty CLI checks:
 ```bash
 cargo fmt --manifest-path tools/rusty-cli/Cargo.toml --check
 cargo check --manifest-path tools/rusty-cli/Cargo.toml --locked
+cargo test --manifest-path tools/rusty-cli/Cargo.toml --locked
 ```
 
 Rusty CLI usage:
@@ -1631,22 +1955,20 @@ The repository-root `./rusty` wrapper remains usable even when the global Bash a
 
 ## Topcoat development reload
 
-Topcoat 0.9's development loop has been inspected directly as part of the View/DX work.
+The development-loop behavior below was inspected directly on Topcoat 0.9 during the earlier View/DX investigation. The repository now targets Topcoat 0.10.0, so these observations are retained as historical compatibility evidence rather than represented as a fresh 0.10 verification.
 
-Verified behavior:
+Verified during that investigation:
 
 - the previous successful application can keep serving while a rebuild is pending
 - a failed rebuild does not require the previous working application to be torn down
 - the dev broadcast process survives application restarts
 - the browser protocol distinguishes rebuilding, build failure, application exit, reload, and already-up-to-date states
 - successful reloads can refresh the current document through Topcoat's browser-side morph/update behavior rather than relying only on a blind full-page reload
-- Topcoat watches local workspace sources broadly enough that future runtime view directories may also trigger its watcher, even when Cargo ultimately has no Rust binary change to rebuild
+- Topcoat watches local workspace sources broadly enough that runtime view directories may also trigger its watcher, even when Cargo ultimately has no Rust binary change to rebuild
 
-`topcoat::dev::script()` is currently retained because it provides Topcoat's browser-side development reload/status behavior.
+`topcoat::dev::script()` remains part of the development integration because it provides Topcoat's browser-side development reload/status behavior.
 
-Under the current Docker configuration, its dynamically selected development endpoint is not exposed correctly to the host browser and can produce a refused `dev.js` request.
-
-This does not affect application functionality. The development endpoint should be corrected separately rather than removing the feature.
+During the 0.9 investigation, the dynamically selected development endpoint was not exposed correctly to the host browser under the Docker configuration and could produce a refused `dev.js` request. That did not affect application functionality in the tested configuration. Any future work on this development endpoint should first revalidate the behavior against the pinned Topcoat 0.10 baseline rather than assuming the 0.9 observation remains unchanged.
 
 The HTML-first view system and Topcoat development loop remain deliberately separate: MiniJinja autoreload handles ordinary HTML view edits, while Topcoat's development machinery remains responsible for Rust rebuild/reload behavior. The project does not reimplement Topcoat's private CLI reload protocol.
 
@@ -1681,7 +2003,7 @@ Do not commit:
 - database data volumes
 - private keys or credentials
 
-## POC roadmap
+## Qualification history — POC 0 through POC 6
 
 ### POC 0 — Frontend/runtime baseline
 
@@ -1751,10 +2073,14 @@ Implemented:
 - deterministic Rusty command-registration markers
 - command scaffold `--dry-run`
 - public-input/persistence/security audit rules
+- `make:view`
+- `make:controller`
+- `make:view-model`
+- atomic `make:page`
+- View/DX scaffold preflight/refusal behavior and dry-run support
 
-Planned:
+Potential future work:
 
-- View/DX scaffolding after the architecture is finalized
 - PostgreSQL-backed model generation and synchronization
 - additional consistency/diagnostic commands only where they provide clear value
 
@@ -1806,26 +2132,25 @@ Future account-lifecycle capabilities:
 
 ### Cross-cutting — View/DX architecture
 
-**Status: Feasibility proven; v1 design in progress**
+**Status: Green v1 baseline**
 
-Verified experimentally:
+View/DX Architecture v1 is adopted and exercised through real application presentation.
 
-- runtime external HTML views can coexist with Topcoat 0.9
-- HTML/view edits do not inherently require Rust recompilation
-- runtime view syntax failures can remain HTTP/runtime failures rather than compiler failures
-- MiniJinja and Tera both satisfy the basic runtime-view requirement
-- MiniJinja currently has the stronger development-DX signal
-- Topcoat's official htmx integration works for server-owned POST updates
-- native Topcoat procedure/signal wiring and HTML-first interactions can coexist
+Implemented and verified:
 
-Current design direction:
+- MiniJinja 2.24.0 provides runtime external HTML views through a narrow application-owned renderer boundary
+- ordinary HTML view edits can be observed in development without a Rust rebuild
+- runtime view failures remain ordinary application/runtime failures rather than compiler failures
+- HTML-first presentation is the default for ordinary pages
+- JavaScript, SCSS, CSS, images, and generated browser assets remain separate from Rust application code
+- htmx 2.0.10 is pinned and self-hosted for server-owned partial interactions where that model is appropriate
+- native Topcoat reactivity remains an opt-in capability rather than the required representation for ordinary presentation
+- Rust controllers and application/query logic feed typed view models
+- the canonical Contacts presentation uses the HTML-first architecture at its established public routes
+- Rusty scaffolding conventions cover views, controllers, view models, and complete public GET pages without becoming a custom template or reactivity framework
+- development, testing, and production use explicit view-loading, validation, diagnostic, and security behavior
 
-- HTML-first default for ordinary presentation
-- separate JS/SCSS/CSS resources
-- native Topcoat reactivity as an opt-in capability
-- Rust controllers/application logic feeding typed view models
-- Rusty scaffolding conventions instead of a custom view/reactivity framework
-- explicit dev/prod view-loading and security policy
+Initial runtime-view and mixed-interaction feasibility was established during the Topcoat 0.9 phase. The repository's production and release baseline now targets Topcoat 0.10.0.
 
 ### POC 4 — Authorization
 
@@ -1906,25 +2231,94 @@ Completed:
 
 The GitHub Actions workflow runs for pull requests, pushes to `main`, and manual dispatch. It uses read-only repository contents permission, disables persisted checkout credentials, creates only ephemeral local PostgreSQL secret files required by the Docker test environment, consumes no repository deployment secrets, and delegates the actual validation matrix to `./release-gate` rather than duplicating release logic in YAML.
 
-The complete POC 6F release matrix has been exercised successfully in the project environment. The GitHub-hosted execution of the workflow remains an integration event that occurs when the workflow is pushed and triggered; the repository does not claim a hosted-run result that has not yet occurred.
+The complete qualification-era POC 6F release matrix has been exercised successfully in the project environment. The GitHub-hosted execution of the workflow remains an integration event that occurs when the workflow is pushed and triggered; the repository does not claim a hosted-run result that has not yet occurred.
 
 Deployment remains deliberately vendor-neutral. `Dockerfile.prod` defines the production application, migration, and operator artifacts; `production-smoke` proves their packaging and runtime contract; and `./release-gate` is the deployability gate. A future deployment pipeline may publish and deploy those validated artifacts to a selected registry/platform, but it must not weaken the established runtime, proxy/TLS, health, secret, migration, or shutdown contracts.
 
-## Decision criteria
+## Qualification outcome
 
-The final decision will not be based solely on performance or preference for Rust.
+The original POC is complete.
 
-Topcoat/Rust must demonstrate that it can provide:
+Its question was not whether Rust can render a website. It was whether a Topcoat-based Rust application could meet a serious production bar while retaining reasonable framework ergonomics and ordinary frontend flexibility.
 
-- maintainable application organization
-- secure defaults or explicit secure replacements
-- reasonable development velocity
-- predictable framework behavior
-- strong testing ergonomics
-- manageable dependency risk
-- clean deployment and operations
-- ordinary HTML/CSS/JavaScript work that does not unnecessarily require Rust recompilation
-- a progressive path from standard web development to native Topcoat reactivity
-- clear separation between routes/controllers, application logic, views, JavaScript, and styles
+The result is:
 
-If recreating Laravel's mature safeguards or developer ergonomics creates excessive custom security or maintenance burden, that will weigh against a rewrite even if the Rust implementation performs well.
+> **Adopt With Constraints for Rust-heavy application contexts.**
+
+The qualification work demonstrated:
+
+- maintainable application/domain/persistence separation;
+- secure authentication and session architecture;
+- typed authorization;
+- strict browser-origin and response-security policy;
+- bounded request handling and explicit upload policy;
+- application audit logging;
+- runtime external HTML views with ordinary frontend editing;
+- progressive enhancement through htmx;
+- opt-in native Topcoat reactivity;
+- isolated PostgreSQL integration testing;
+- SQLx compile-time contracts;
+- project-owned dependency and security auditing;
+- hardened production images;
+- trusted-proxy/TLS contracts;
+- sanitized operational telemetry;
+- liveness/readiness semantics;
+- graceful shutdown;
+- reproducible production packaging;
+- a canonical release gate and thin CI caller.
+
+The qualification also established the principal constraint: Topcoat is not yet as mature or batteries-included across common application concerns as a framework such as Laravel. Atlasyr therefore accepts an ongoing platform-maintenance responsibility and must continuously reassess whether project-owned features should remain owned, become provider choices, or migrate to new Topcoat capabilities.
+
+### Qualification scorecard
+
+The final framework evaluation used Laravel + Livewire as the mature reference bar rather than as a product target.
+
+| Decision criterion | Atlasyr qualification baseline | Laravel + Livewire reference |
+| --- | ---: | ---: |
+| Maintainable application organization | 4.5 / 5 | 4.5 / 5 |
+| Secure defaults or explicit replacements | 4.0 / 5 | 5.0 / 5 |
+| Reasonable development velocity | 3.0 / 5 | 5.0 / 5 |
+| Predictable framework behavior | 4.0 / 5 | 5.0 / 5 |
+| Strong testing ergonomics | 4.5 / 5 | 5.0 / 5 |
+| Manageable dependency risk | 4.0 / 5 | 4.5 / 5 |
+| Clean deployment and operations | 4.5 / 5 | 5.0 / 5 |
+| Ordinary HTML/CSS/JavaScript without unnecessary Rust recompilation | 4.5 / 5 | 5.0 / 5 |
+| Progressive standard-web to native reactive path | 5.0 / 5 | 5.0 / 5 |
+| Clear separation of concerns | 5.0 / 5 | 4.5 / 5 |
+
+The score is evidence for where Atlasyr should invest next, not a marketing benchmark.
+
+### Adoption constraints
+
+Atlasyr proceeds under these constraints:
+
+- Topcoat remains explicitly credited as the upstream framework foundation.
+- Topcoat upgrades are handled through dedicated compatibility review, not casual dependency bumps.
+- ordinary presentation remains HTML-first unless native Topcoat machinery provides a meaningful advantage;
+- native Topcoat remains available rather than being hidden behind an Atlasyr imitation;
+- framework-owned security behavior remains explicit, tested, and fail-closed;
+- mature third-party infrastructure is integrated rather than recreated;
+- Rusty automates established conventions rather than inventing a parallel framework;
+- core simplification is preferred over generating unnecessary boilerplate;
+- new abstractions require pressure from real application slices;
+- production and dependency release gates remain part of the framework contract.
+
+### Immediate closeout work
+
+The product roadmap begins with several qualification-closeout tasks:
+
+1. record and freeze this final qualification decision;
+2. review the inherited `MAX_TRUSTED_PROXY_NETWORKS = 64` limit and either justify it with evidence or remove the arbitrary cap in a focused corrective slice;
+3. revalidate the historical Topcoat 0.9 Docker `dev.js` development-endpoint observation against the pinned Topcoat 0.10 baseline;
+4. seed the Topcoat/Atlasyr capability ledger;
+5. add durable upstream attribution / notice material appropriate to Topcoat's MIT-licensed foundation;
+6. plan the repository/package/product rename without rewriting frozen qualification history;
+7. establish the permanent Topcoat compatibility workflow before major new product features.
+
+After that boundary is frozen, future work is product/framework development rather than additional numbered POCs.
+
+## Historical qualification record
+
+The detailed POC 0 through POC 6 record above is intentionally retained as engineering evidence. Those sections document why current Atlasyr conventions exist and provide rollback/reference points for future framework changes.
+
+The forward-looking roadmap is no longer maintained as a POC sequence. See [`ROADMAP.md`](ROADMAP.md).
