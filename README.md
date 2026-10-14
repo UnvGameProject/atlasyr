@@ -344,7 +344,7 @@ The project uses Docker for the application runtime, frontend asset build, Postg
 
 ```bash
 git clone <your-repository-url>
-cd topcoat_poc
+cd atlasyr
 ```
 
 If this repository is being used as a GitHub template, create a new repository from the template first, then clone the new repository.
@@ -487,11 +487,11 @@ Because the wrapper is location-independent, an optional Bash alias can make Rus
 
 ```bash
 grep -Fqx \
-  'alias rusty="$HOME/projects/topcoat_poc/rusty"' \
+  'alias rusty="$HOME/projects/atlasyr/rusty"' \
   ~/.bashrc || cat >> ~/.bashrc <<'EOF'
 
 # Atlasyr Rusty CLI
-alias rusty="$HOME/projects/topcoat_poc/rusty"
+alias rusty="$HOME/projects/atlasyr/rusty"
 EOF
 
 source ~/.bashrc
