@@ -1,0 +1,411 @@
+#!/usr/bin/env bash
+(
+set -euo pipefail
+
+PROJECT_ROOT="$(
+    CDPATH= cd -- "$(dirname -- "$0")" &&
+    pwd
+)"
+
+cd "$PROJECT_ROOT"
+
+CLIPPY_JSON="$(
+    mktemp
+)"
+
+cleanup() {
+    rm -f "$CLIPPY_JSON"
+}
+
+trap cleanup EXIT HUP INT TERM
+
+printf '\n============================================================\n'
+printf ' TOPCOAT POC — PRODUCTION RELEASE GATE\n'
+printf '============================================================\n'
+
+printf '\n===== RELEASE ENVIRONMENT PREFLIGHT =====\n'
+
+command -v docker >/dev/null
+command -v git >/dev/null
+command -v python3 >/dev/null
+
+docker version >/dev/null
+docker compose version >/dev/null
+
+for SECRET in \
+    postgres_bootstrap_password \
+    postgres_migrator_password \
+    postgres_app_password \
+    postgres_test_password
+do
+    if [ ! -s ".secrets/$SECRET" ]; then
+        printf 'ERROR: required local Docker secret missing: .secrets/%s\n' \
+            "$SECRET" >&2
+        exit 1
+    fi
+done
+
+docker compose config --quiet
+
+printf '%s\n' \
+    'Docker, Compose, repository, and secret preconditions verified'
+
+printf '\n===== SHELL CONTRACT =====\n'
+
+bash -n release-gate
+bash -n production-smoke
+
+for SCRIPT in \
+    test \
+    rusty \
+    sqlx-cache \
+    dependency-audit
+do
+    sh -n "$SCRIPT"
+done
+
+printf '%s\n' \
+    'project shell entrypoints parse cleanly'
+
+printf '\n===== RUST FORMAT =====\n'
+
+docker compose run \
+    --rm \
+    --no-deps \
+    app \
+    cargo fmt \
+        --all \
+        -- \
+        --check
+
+printf '\n===== LOCKED ALL-TARGET COMPILE =====\n'
+
+docker compose run \
+    --rm \
+    --no-deps \
+    app \
+    sh -c '
+        set -eu
+
+        SQLX_OFFLINE=true \
+            cargo check \
+                --workspace \
+                --all-targets \
+                --all-features \
+                --locked
+    '
+
+printf '\n===== CLIPPY EXACT LEGACY BASELINE =====\n'
+
+docker compose run \
+    --rm \
+    --no-deps \
+    app \
+    sh -c '
+        set -eu
+
+        SQLX_OFFLINE=true \
+            cargo clippy \
+                --workspace \
+                --all-targets \
+                --all-features \
+                --locked \
+                --message-format=json
+    ' \
+    >"$CLIPPY_JSON"
+
+python3 - \
+    "$CLIPPY_JSON" \
+    <<'PY_CLIPPY'
+from collections import Counter
+import json
+import sys
+
+path = sys.argv[1]
+
+# These warnings predate POC 6 and remain explicit technical debt.
+#
+# `cargo clippy --all-targets` may emit the same source diagnostic more
+# than once because a library can be compiled for multiple targets.
+# Therefore:
+#
+# 1. identical source diagnostics are de-duplicated by lint, file,
+#    primary location, and diagnostic message;
+# 2. the resulting unique diagnostics are compared against the known
+#    legacy lint/file warning-count baseline.
+#
+# No warning is globally suppressed by this gate.
+expected = Counter({
+    (
+        "dead_code",
+        "src/db/models/contact/persistence.rs",
+    ): 1,
+
+    (
+        "clippy::enum_variant_names",
+        "src/application/authorization/policy.rs",
+    ): 1,
+
+    (
+        "clippy::manual_is_multiple_of",
+        "src/auth/driver/throttle.rs",
+    ): 1,
+
+    (
+        "clippy::manual_pattern_char_comparison",
+        "src/config/database.rs",
+    ): 1,
+
+    (
+        "clippy::large_enum_variant",
+        "src/web/controllers/contacts.rs",
+    ): 1,
+
+    (
+        "clippy::unnecessary_to_owned",
+        "src/domain/user/tests/create.rs",
+    ): 2,
+})
+
+unique_diagnostics = set()
+raw_primary_diagnostics = 0
+
+with open(
+    path,
+    encoding="utf-8",
+) as stream:
+    for line in stream:
+        line = line.strip()
+
+        if not line.startswith("{"):
+            continue
+
+        try:
+            message = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+
+        if message.get(
+            "reason"
+        ) != "compiler-message":
+            continue
+
+        diagnostic = (
+            message.get("message")
+            or {}
+        )
+
+        if diagnostic.get(
+            "level"
+        ) != "warning":
+            continue
+
+        code = (
+            diagnostic.get("code")
+            or {}
+        ).get("code") or "<no-code>"
+
+        diagnostic_message = (
+            diagnostic.get("message")
+            or ""
+        )
+
+        primary_spans = [
+            span
+            for span in (
+                diagnostic.get("spans")
+                or []
+            )
+            if (
+                span.get("is_primary")
+                and span.get("file_name")
+            )
+        ]
+
+        if not primary_spans:
+            raw_primary_diagnostics += 1
+
+            unique_diagnostics.add(
+                (
+                    code,
+                    "<no-primary-file>",
+                    0,
+                    0,
+                    diagnostic_message,
+                )
+            )
+
+            continue
+
+        for span in primary_spans:
+            raw_primary_diagnostics += 1
+
+            unique_diagnostics.add(
+                (
+                    code,
+                    span["file_name"],
+                    span.get(
+                        "line_start",
+                        0,
+                    ),
+                    span.get(
+                        "column_start",
+                        0,
+                    ),
+                    diagnostic_message,
+                )
+            )
+
+actual = Counter(
+    (
+        code,
+        file_name,
+    )
+    for (
+        code,
+        file_name,
+        _line,
+        _column,
+        _message,
+    )
+    in unique_diagnostics
+)
+
+if actual != expected:
+    print(
+        "FAIL: Clippy warning baseline changed",
+        file=sys.stderr,
+    )
+
+    print(
+        "\nExpected unique warning baseline:",
+        file=sys.stderr,
+    )
+
+    for key, count in sorted(
+        expected.items()
+    ):
+        print(
+            f"  {count} x {key[0]} @ {key[1]}",
+            file=sys.stderr,
+        )
+
+    print(
+        "\nActual unique warning baseline:",
+        file=sys.stderr,
+    )
+
+    for key, count in sorted(
+        actual.items()
+    ):
+        print(
+            f"  {count} x {key[0]} @ {key[1]}",
+            file=sys.stderr,
+        )
+
+    print(
+        "\nRaw all-target primary emissions: "
+        f"{raw_primary_diagnostics}",
+        file=sys.stderr,
+    )
+
+    print(
+        "Unique source diagnostics: "
+        f"{len(unique_diagnostics)}",
+        file=sys.stderr,
+    )
+
+    raise SystemExit(1)
+
+print(
+    "Clippy all-target emissions: "
+    f"{raw_primary_diagnostics} raw -> "
+    f"{len(unique_diagnostics)} unique"
+)
+
+print(
+    "PASS: exact pre-existing Clippy warning baseline unchanged"
+)
+
+PY_CLIPPY
+
+printf '\n===== APPLICATION TEST MATRIX =====\n'
+
+./test
+
+printf '\n===== NORMAL DATABASE / MIGRATION CONTRACT =====\n'
+
+docker compose up \
+    -d \
+    postgres
+
+docker compose run \
+    --rm \
+    migrate
+
+printf '%s\n' \
+    'normal PostgreSQL and migration path established'
+
+printf '\n===== SQLX ONLINE CACHE CONTRACT =====\n'
+
+./sqlx-cache check
+
+git diff \
+    --quiet \
+    -- \
+    .sqlx
+
+printf '%s\n' \
+    'checked-in SQLx metadata remains current'
+
+printf '\n===== RUSTY CLI REGRESSION SUITE =====\n'
+
+docker compose run \
+    --rm \
+    --no-deps \
+    -e CARGO_TARGET_DIR=/tmp/rusty-cli-test-target \
+    app \
+    cargo test \
+        --manifest-path \
+            /app/tools/rusty-cli/Cargo.toml \
+        --locked
+
+printf '\n===== RUSTY ARCHITECTURE / SECURITY AUDIT =====\n'
+
+./rusty audit
+
+printf '\n===== DEPENDENCY / SUPPLY-CHAIN GATE =====\n'
+
+./dependency-audit
+
+printf '\n===== PRODUCTION ARTIFACT / RUNTIME MATRIX =====\n'
+
+./production-smoke
+
+printf '\n===== REPOSITORY INTEGRITY =====\n'
+
+git diff --check
+
+if ! git diff --quiet; then
+    printf '%s\n' \
+        'ERROR: release gates modified tracked repository content' >&2
+
+    git status --short >&2
+    exit 1
+fi
+
+if ! git diff --cached --quiet; then
+    printf '%s\n' \
+        'ERROR: release gates unexpectedly staged repository content' >&2
+
+    git status --short >&2
+    exit 1
+fi
+
+printf '%s\n' \
+    'release gates leave tracked repository content unchanged'
+
+printf '\n============================================================\n'
+printf ' PRODUCTION RELEASE GATE GREEN\n'
+printf '============================================================\n'
+)

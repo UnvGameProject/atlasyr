@@ -484,7 +484,7 @@ The temporary native Contacts presentation has now been retired together with it
 
 - Rust 1.98.1
 - Rust edition 2024
-- Topcoat 0.9.0
+- Topcoat 0.10.0
 - Tokio
 - SQLx 0.9.0
 - PostgreSQL 18.6
@@ -1233,10 +1233,7 @@ and resource constraints, absence of foreign-key lifecycle coupling, exclusion
 of unsuccessful application outcomes, and transaction rollback when audit
 persistence fails for contact creation, update, or deletion.
 
-Long-term audit retention, export, centralized collection, and operational access
-remain separate deployment and operations concerns. POC 6E adds sanitized application
-request and lifecycle telemetry, but it does not claim centralized log shipping,
-telemetry retention, or durable audit export.
+Long-term audit retention, export, centralized collection, and operational access remain separate deployment and operations concerns. The completed production-readiness baseline provides sanitized application request and lifecycle telemetry plus release-gate verification, but it does not claim centralized log shipping, telemetry retention, an external metrics/alerting backend, or durable audit export.
 
 ## Authentication and session baseline
 
@@ -1883,13 +1880,13 @@ The application-wide web-security baseline is complete for the current POC:
   minimal durable audit event in the same database transaction as the business
   mutation, with the runtime role restricted to INSERT-only audit access.
 
-POC 5 intentionally deferred runtime and deployment concerns to POC 6 rather than emulating them inside application controllers. Through POC 6E, the production baseline now covers dependency and reproducibility gates, production packaging, hardened container execution, reverse-proxy/TLS trust, operational request telemetry, sanitized panic telemetry, explicit health/readiness semantics, and graceful process shutdown.
+POC 5 intentionally deferred runtime and deployment concerns to POC 6 rather than emulating them inside application controllers. POC 6 now completes the production-readiness baseline for the current POC scope: reproducible dependency gates, production packaging, hardened container execution, reverse-proxy/TLS trust, operational request telemetry, sanitized panic handling, explicit health/readiness semantics, graceful process shutdown, and a canonical production release matrix.
 
-Centralized log shipping, retention, external metrics/alerting, and deployment-platform configuration remain deployment concerns rather than application framework responsibilities.
+Centralized log shipping and retention, external metrics/alerting infrastructure, registry selection, hosting-platform configuration, rollout strategy, and environment-specific ingress implementation remain deployment choices rather than application-framework responsibilities. The POC defines and verifies the contract those systems must preserve without pretending that one vendor-specific deployment is part of the framework.
 
 ### POC 6 — Production readiness
 
-**Status: In progress through POC 6E**
+**Status: Green baseline for current POC scope**
 
 Completed:
 
@@ -1901,21 +1898,17 @@ Completed:
 - production TLS termination and HSTS ownership contract;
 - sanitized whole-request operational telemetry;
 - sanitized production panic telemetry;
-- separate liveness and PostgreSQL-backed readiness endpoints; and
-- explicit SIGTERM handling with a 30-second Topcoat graceful-drain contract.
+- separate liveness and PostgreSQL-backed readiness endpoints;
+- explicit SIGTERM handling with a 30-second Topcoat graceful-drain contract;
+- production runtime-view and asset startup validation with fail-closed package checks;
+- canonical `./release-gate` orchestration of formatting, locked all-target compilation, the exact tracked Clippy warning baseline, application tests, database/migration validation, SQLx metadata verification, Rusty CLI regression tests, Rusty architecture/security audit, dependency/supply-chain auditing, production runtime smoke testing, and repository-integrity checks; and
+- `.github/workflows/production-gate.yml` as a thin GitHub Actions caller of the canonical release gate.
 
-Remaining:
+The GitHub Actions workflow runs for pull requests, pushes to `main`, and manual dispatch. It uses read-only repository contents permission, disables persisted checkout credentials, creates only ephemeral local PostgreSQL secret files required by the Docker test environment, consumes no repository deployment secrets, and delegates the actual validation matrix to `./release-gate` rather than duplicating release logic in YAML.
 
-- final production test matrix and CI/deployment closeout.
+The complete POC 6F release matrix has been exercised successfully in the project environment. The GitHub-hosted execution of the workflow remains an integration event that occurs when the workflow is pushed and triggered; the repository does not claim a hosted-run result that has not yet occurred.
 
-**Status: Planned**
-
-- complete test matrix
-- dependency auditing
-- container hardening
-- observability
-- deployment strategy
-- production runtime-view validation/preload/package policy
+Deployment remains deliberately vendor-neutral. `Dockerfile.prod` defines the production application, migration, and operator artifacts; `production-smoke` proves their packaging and runtime contract; and `./release-gate` is the deployability gate. A future deployment pipeline may publish and deploy those validated artifacts to a selected registry/platform, but it must not weaken the established runtime, proxy/TLS, health, secret, migration, or shutdown contracts.
 
 ## Decision criteria
 
