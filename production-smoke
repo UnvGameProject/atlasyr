@@ -9,9 +9,9 @@ PROJECT_ROOT="$(
 
 cd "$PROJECT_ROOT"
 
-APP_IMAGE='topcoat-poc-production-app:smoke'
-MIGRATE_IMAGE='topcoat-poc-production-migrate:smoke'
-CREATE_USER_IMAGE='topcoat-poc-production-create-user:smoke'
+APP_IMAGE='atlasyr-production-app:smoke'
+MIGRATE_IMAGE='atlasyr-production-migrate:smoke'
+CREATE_USER_IMAGE='atlasyr-production-create-user:smoke'
 
 RUNTIME_HARDENING=(
     --read-only
@@ -19,7 +19,7 @@ RUNTIME_HARDENING=(
     --security-opt no-new-privileges=true
 )
 
-APP_CONTAINER='topcoat-poc-production-smoke-app'
+APP_CONTAINER='atlasyr-production-smoke-app'
 
 TEMP_DIR="$(
     mktemp -d
@@ -88,7 +88,7 @@ test "$(
     docker image inspect \
         --format '{{json .Config.Entrypoint}}' \
         "$APP_IMAGE"
-)" = '["/app/topcoat-poc"]'
+)" = '["/app/atlasyr"]'
 
 test "$(
     docker image inspect \
@@ -177,7 +177,7 @@ docker run \
         test "$(id -u)" = 10001
         test "$(id -g)" = 10001
 
-        test -x /app/topcoat-poc
+        test -x /app/atlasyr
         test -s /app/assets/manifest.toml
         test -d /app/resources/views
 
@@ -247,7 +247,7 @@ docker run \
         set -eu
 
         test -x /app/migrate
-        test ! -e /app/topcoat-poc
+        test ! -e /app/atlasyr
         test ! -e /app/create-user
         test ! -e /app/assets
         test ! -e /app/resources
@@ -266,7 +266,7 @@ docker run \
         set -eu
 
         test -x /app/create-user
-        test ! -e /app/topcoat-poc
+        test ! -e /app/atlasyr
         test ! -e /app/migrate
         test ! -e /app/assets
         test ! -e /app/resources
@@ -283,7 +283,7 @@ docker run \
     --rm \
     --entrypoint /usr/bin/ldd \
     "$APP_IMAGE" \
-    /app/topcoat-poc \
+    /app/atlasyr \
     | tee "$TEMP_DIR/ldd.txt"
 
 if grep -q 'not found' "$TEMP_DIR/ldd.txt"; then
@@ -415,8 +415,8 @@ docker run \
     --network "$NETWORK" \
     --env DB_HOST=postgres \
     --env DB_PORT=5432 \
-    --env DB_NAME=topcoat_poc \
-    --env DB_USER=topcoat_migrator \
+    --env DB_NAME=atlasyr \
+    --env DB_USER=atlasyr_migrator \
     --env DB_PASSWORD_FILE=/run/secrets/database_password \
     --mount \
         "type=bind,src=$PROJECT_ROOT/.secrets/postgres_migrator_password,dst=/run/secrets/database_password,readonly" \
@@ -438,8 +438,8 @@ printf '%s\n' \
         --network "$NETWORK" \
         --env DB_HOST=postgres \
         --env DB_PORT=5432 \
-        --env DB_NAME=topcoat_poc \
-        --env DB_USER=topcoat_migrator \
+        --env DB_NAME=atlasyr \
+        --env DB_USER=atlasyr_migrator \
         --env DB_PASSWORD_FILE=/run/secrets/database_password \
         --mount \
             "type=bind,src=$PROJECT_ROOT/.secrets/postgres_migrator_password,dst=/run/secrets/database_password,readonly" \
@@ -487,8 +487,8 @@ docker run \
     --publish 127.0.0.1::3000 \
     --env DB_HOST=postgres \
     --env DB_PORT=5432 \
-    --env DB_NAME=topcoat_poc \
-    --env DB_USER=topcoat_app \
+    --env DB_NAME=atlasyr \
+    --env DB_USER=atlasyr_app \
     --env DB_PASSWORD_FILE=/run/secrets/database_password \
     --mount \
         "type=bind,src=$PROJECT_ROOT/.secrets/postgres_app_password,dst=/run/secrets/database_password,readonly" \
@@ -957,8 +957,8 @@ docker run \
     --publish 127.0.0.1::3000 \
     --env DB_HOST=postgres \
     --env DB_PORT=5432 \
-    --env DB_NAME=topcoat_poc \
-    --env DB_USER=topcoat_app \
+    --env DB_NAME=atlasyr \
+    --env DB_USER=atlasyr_app \
     --env DB_PASSWORD_FILE=/run/secrets/database_password \
     --env TRUSTED_PROXY_NETWORKS="$DIRECT_PEER_IP" \
     --mount \
@@ -1061,8 +1061,8 @@ docker run \
     --network "$NETWORK" \
     --env DB_HOST=postgres \
     --env DB_PORT=5432 \
-    --env DB_NAME=topcoat_poc \
-    --env DB_USER=topcoat_app \
+    --env DB_NAME=atlasyr \
+    --env DB_USER=atlasyr_app \
     --env DB_PASSWORD_FILE=/run/secrets/database_password \
     --env TRUSTED_PROXY_NETWORKS='not-a-network' \
     --mount \
@@ -1101,8 +1101,8 @@ docker run \
     --network "$NETWORK" \
     --env DB_HOST=postgres \
     --env DB_PORT=5432 \
-    --env DB_NAME=topcoat_poc \
-    --env DB_USER=topcoat_app \
+    --env DB_NAME=atlasyr \
+    --env DB_USER=atlasyr_app \
     --env DB_PASSWORD_FILE=/run/secrets/database_password \
     --mount \
         "type=bind,src=$PROJECT_ROOT/.secrets/postgres_app_password,dst=/run/secrets/database_password,readonly" \
@@ -1138,8 +1138,8 @@ docker run \
     --network "$NETWORK" \
     --env DB_HOST=postgres \
     --env DB_PORT=5432 \
-    --env DB_NAME=topcoat_poc \
-    --env DB_USER=topcoat_app \
+    --env DB_NAME=atlasyr \
+    --env DB_USER=atlasyr_app \
     --env DB_PASSWORD_FILE=/run/secrets/database_password \
     --mount \
         "type=bind,src=$PROJECT_ROOT/.secrets/postgres_app_password,dst=/run/secrets/database_password,readonly" \

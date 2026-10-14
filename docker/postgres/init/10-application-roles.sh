@@ -11,7 +11,7 @@ psql \
     --set=migrator_password="$migrator_password" \
     --set=app_password="$app_password" <<'SQL'
 
-CREATE ROLE topcoat_migrator
+CREATE ROLE atlasyr_migrator
     LOGIN
     PASSWORD :'migrator_password'
     NOSUPERUSER
@@ -19,7 +19,7 @@ CREATE ROLE topcoat_migrator
     NOCREATEROLE
     NOREPLICATION;
 
-CREATE ROLE topcoat_app
+CREATE ROLE atlasyr_app
     LOGIN
     PASSWORD :'app_password'
     NOSUPERUSER
@@ -27,20 +27,20 @@ CREATE ROLE topcoat_app
     NOCREATEROLE
     NOREPLICATION;
 
-ALTER DATABASE topcoat_poc OWNER TO topcoat_migrator;
-ALTER SCHEMA public OWNER TO topcoat_migrator;
+ALTER DATABASE atlasyr OWNER TO atlasyr_migrator;
+ALTER SCHEMA public OWNER TO atlasyr_migrator;
 
-GRANT CONNECT ON DATABASE topcoat_poc TO topcoat_app;
-GRANT USAGE ON SCHEMA public TO topcoat_app;
-
-ALTER DEFAULT PRIVILEGES
-    FOR ROLE topcoat_migrator
-    IN SCHEMA public
-    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO topcoat_app;
+GRANT CONNECT ON DATABASE atlasyr TO atlasyr_app;
+GRANT USAGE ON SCHEMA public TO atlasyr_app;
 
 ALTER DEFAULT PRIVILEGES
-    FOR ROLE topcoat_migrator
+    FOR ROLE atlasyr_migrator
     IN SCHEMA public
-    GRANT USAGE, SELECT ON SEQUENCES TO topcoat_app;
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO atlasyr_app;
+
+ALTER DEFAULT PRIVILEGES
+    FOR ROLE atlasyr_migrator
+    IN SCHEMA public
+    GRANT USAGE, SELECT ON SEQUENCES TO atlasyr_app;
 
 SQL

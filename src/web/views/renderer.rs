@@ -246,7 +246,7 @@ mod tests {
 
     #[test]
     fn startup_validation_rejects_malformed_registered_view() {
-        let root = std::env::temp_dir().join(format!("topcoat-poc-view-test-{}", Uuid::new_v4(),));
+        let root = std::env::temp_dir().join(format!("atlasyr-view-test-{}", Uuid::new_v4(),));
 
         fs::create_dir_all(&root).expect("temporary view root should be created");
 

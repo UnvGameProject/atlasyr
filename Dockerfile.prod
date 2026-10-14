@@ -42,10 +42,10 @@ COPY --from=frontend-builder /build/generated ./generated
 RUN before="$(sha256sum Cargo.lock)" \
     && topcoat asset bundle \
         --release \
-        --bin topcoat-poc \
+        --bin atlasyr \
     && after="$(sha256sum Cargo.lock)" \
     && test "$before" = "$after" \
-    && test -x target/release/topcoat-poc \
+    && test -x target/release/atlasyr \
     && test -s target/release/assets/manifest.toml
 
 RUN cargo build \
@@ -84,8 +84,8 @@ USER 10001:10001
 FROM runtime-base AS app
 
 COPY --from=rust-builder \
-    /build/target/release/topcoat-poc \
-    /app/topcoat-poc
+    /build/target/release/atlasyr \
+    /app/atlasyr
 
 COPY --from=rust-builder \
     /build/target/release/assets \
@@ -104,7 +104,7 @@ EXPOSE 3000
 
 STOPSIGNAL SIGTERM
 
-ENTRYPOINT ["/app/topcoat-poc"]
+ENTRYPOINT ["/app/atlasyr"]
 
 
 FROM runtime-base AS migrate

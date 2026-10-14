@@ -19,7 +19,7 @@ async fn run() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let password = read_password_from_stdin()?;
 
-    topcoat_poc::run_create_user(email, role, password).await?;
+    atlasyr::run_create_user(email, role, password).await?;
 
     println!("User created.");
 

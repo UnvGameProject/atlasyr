@@ -10,18 +10,18 @@ pub(crate) async fn run(pool: &PgPool) -> Result<(), MigrateError> {
 
     // The runtime application must never be able to alter SQLx's
     // migration history, even though default table privileges are
-    // granted to topcoat_app for application tables.
+    // granted to atlasyr_app for application tables.
     sqlx::query(
         "REVOKE ALL PRIVILEGES
          ON TABLE public._sqlx_migrations
-         FROM topcoat_app",
+         FROM atlasyr_app",
     )
     .execute(pool)
     .await?;
 
     // Schema migrations intentionally remain independent of deployment-role
     // names because #[sqlx::test] applies them to isolated databases whose
-    // PostgreSQL cluster does not define topcoat_app. The real migration
+    // PostgreSQL cluster does not define atlasyr_app. The real migration
     // service does define that role, so deployment-specific least privilege
     // is finalized here after every schema migration succeeds.
     //
@@ -32,7 +32,7 @@ pub(crate) async fn run(pool: &PgPool) -> Result<(), MigrateError> {
     sqlx::query(
         "REVOKE ALL PRIVILEGES
          ON TABLE public.audit_events
-         FROM topcoat_app",
+         FROM atlasyr_app",
     )
     .execute(pool)
     .await?;
@@ -40,7 +40,7 @@ pub(crate) async fn run(pool: &PgPool) -> Result<(), MigrateError> {
     sqlx::query(
         "GRANT INSERT
          ON TABLE public.audit_events
-         TO topcoat_app",
+         TO atlasyr_app",
     )
     .execute(pool)
     .await?;

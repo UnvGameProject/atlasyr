@@ -19,8 +19,8 @@ fail()
 [ "${DB_NAME:-}" = "postgres" ] \
     || fail "DB_NAME must be postgres"
 
-[ "${DB_USER:-}" = "topcoat_test_admin" ] \
-    || fail "DB_USER must be topcoat_test_admin"
+[ "${DB_USER:-}" = "atlasyr_test_admin" ] \
+    || fail "DB_USER must be atlasyr_test_admin"
 
 [ "${DB_PASSWORD_FILE:-}" = "/run/secrets/postgres_test_password" ] \
     || fail "unexpected database secret path"

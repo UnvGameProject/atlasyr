@@ -42,7 +42,7 @@ async fn app_layout(cx: &Cx, slot: Slot<'_>) -> Result<impl View> {
                     content="dark light"
                 >
 
-                <title>"Topcoat POC"</title>
+                <title>"Atlasyr"</title>
 
                 <link
                     rel="stylesheet"
@@ -72,7 +72,7 @@ async fn app_layout(cx: &Cx, slot: Slot<'_>) -> Result<impl View> {
                             class="navbar-brand fw-semibold"
                             href="/"
                         >
-                            "Topcoat POC"
+                            "Atlasyr"
                         </a>
 
                         <div class="d-flex align-items-center gap-3">

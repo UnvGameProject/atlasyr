@@ -240,7 +240,7 @@ fn generate_template(names: &ViewNames) -> String {
     format!(
         "{{% extends \"layouts/app.html\" %}}\n\
          \n\
-         {{% block title %}}{} | Topcoat POC{{% endblock %}}\n\
+         {{% block title %}}{} | Atlasyr{{% endblock %}}\n\
          \n\
          {{% block content %}}\n\
          <main>\n\

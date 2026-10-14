@@ -1,9 +1,9 @@
 [package]
-name = "topcoat-poc"
+name = "atlasyr"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.98"
-default-run = "topcoat-poc"
+default-run = "atlasyr"
 
 [dependencies]
 topcoat = { version = "=0.10.0", features = ["tower", "htmx"] }

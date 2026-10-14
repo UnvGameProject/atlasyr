@@ -1,5 +1,5 @@
 {
-  "name": "topcoat-poc-assets",
+  "name": "atlasyr-assets",
   "private": true,
   "scripts": {
     "build:css": "sass --load-path=node_modules --style=expanded --source-map resources/scss/app.scss generated/app.css",

@@ -20,7 +20,7 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 printf '\n============================================================\n'
-printf ' TOPCOAT POC — PRODUCTION RELEASE GATE\n'
+printf ' ATLASYR — PRODUCTION RELEASE GATE\n'
 printf '============================================================\n'
 
 printf '\n===== RELEASE ENVIRONMENT PREFLIGHT =====\n'

@@ -18,7 +18,7 @@ pub async fn run() -> AppResult<()> {
 pub async fn run_migrations() -> AppResult<()> {
     let database_config = config::DatabaseConfig::load()?;
 
-    let database = db::connect(&database_config, "topcoat-poc-migrator").await?;
+    let database = db::connect(&database_config, "atlasyr-migrator").await?;
 
     db::migrate(&database).await?;
 
@@ -41,7 +41,7 @@ pub async fn run_create_user(email: String, role: String, password: String) -> A
 
     let database_config = config::DatabaseConfig::load()?;
 
-    let database = db::connect(&database_config, "topcoat-poc-create-user").await?;
+    let database = db::connect(&database_config, "atlasyr-create-user").await?;
 
     db::healthcheck(&database).await?;
 

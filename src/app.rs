@@ -54,7 +54,7 @@ pub(crate) async fn run() -> Result<(), Box<dyn Error + Send + Sync>> {
     // the direct peer and ignores client-supplied forwarding headers.
     let proxy_config = ProxyConfig::load()?;
 
-    let database = db::connect(&database_config, "topcoat-poc").await?;
+    let database = db::connect(&database_config, "atlasyr").await?;
 
     db::healthcheck(&database).await?;
 
