@@ -277,6 +277,8 @@ For every Topcoat release considered for adoption, Atlasyr should review:
 
 Stable Atlasyr releases should pin a reviewed Topcoat version while Topcoat remains pre-1.0. Atlasyr's own versioning should remain independent, with an explicit compatibility matrix documenting which Topcoat versions each Atlasyr release has actually qualified.
 
+The [compatibility matrix](docs/compatibility-matrix.md) records the qualified dependency and toolchain baseline. The [Topcoat release-intake workflow](docs/topcoat-release-intake.md) defines the evidence required before adopting a new upstream release.
+
 A non-release canary against Topcoat `main` is planned so likely breakage can be discovered before an upstream release rather than during an emergency upgrade.
 
 ## Development velocity objective
