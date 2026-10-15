@@ -7,8 +7,6 @@ use std::{
 
 const TRUSTED_PROXY_NETWORKS_ENV: &str = "TRUSTED_PROXY_NETWORKS";
 
-const MAX_TRUSTED_PROXY_NETWORKS: usize = 64;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ProxyConfig {
     trusted_networks: Vec<String>,
@@ -42,12 +40,6 @@ impl ProxyConfig {
 
         let raw_networks = value.split(',').map(str::trim).collect::<Vec<_>>();
 
-        if raw_networks.len() > MAX_TRUSTED_PROXY_NETWORKS {
-            return Err(ProxyConfigError::TooManyNetworks {
-                count: raw_networks.len(),
-            });
-        }
-
         let trusted_networks = raw_networks
             .into_iter()
             .map(normalize_network)
@@ -64,7 +56,6 @@ pub(crate) enum ProxyConfigError {
     EmptyEntry,
     InvalidNetwork(String),
     CatchAllNetwork(String),
-    TooManyNetworks { count: usize },
 }
 
 impl Display for ProxyConfigError {
@@ -93,11 +84,6 @@ impl Display for ProxyConfigError {
             Self::CatchAllNetwork(network) => write!(
                 formatter,
                 "{TRUSTED_PROXY_NETWORKS_ENV} must not trust a catch-all network: {network:?}",
-            ),
-
-            Self::TooManyNetworks { count } => write!(
-                formatter,
-                "{TRUSTED_PROXY_NETWORKS_ENV} contains {count} networks; maximum is {MAX_TRUSTED_PROXY_NETWORKS}",
             ),
         }
     }
@@ -258,12 +244,26 @@ mod tests {
     }
 
     #[test]
-    fn trusted_proxy_network_count_is_bounded() {
-        let value = vec!["127.0.0.1"; 65].join(",");
+    fn valid_proxy_network_lists_are_not_arbitrarily_capped() {
+        let networks = (1..=65)
+            .map(|index| format!("10.0.0.{index}"))
+            .collect::<Vec<_>>();
+        let value = networks.join(",");
+
+        let config =
+            ProxyConfig::parse(Some(&value)).expect("valid configured networks should parse");
+
+        assert_eq!(config.trusted_networks().count(), 65);
+    }
+
+    #[test]
+    fn malformed_network_in_long_list_still_fails_closed() {
+        let mut networks = vec!["127.0.0.1"; 65];
+        networks.push("not-a-network");
 
         assert_eq!(
-            ProxyConfig::parse(Some(&value)),
-            Err(ProxyConfigError::TooManyNetworks { count: 65 },),
+            ProxyConfig::parse(Some(&networks.join(","))),
+            Err(ProxyConfigError::InvalidNetwork("not-a-network".to_owned(),)),
         );
     }
 }
