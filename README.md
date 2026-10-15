@@ -28,7 +28,7 @@ The frozen qualification checkpoint is:
 - Rust toolchain: `1.98.1`
 - application release gate: `./release-gate`
 
-The repository name and some historical terminology still reflect the qualification period. Product-transition work will rename and reorganize those surfaces deliberately rather than rewriting Git history.
+The qualification-era repository was renamed in place to Atlasyr, preserving historical commits and tags. Qualification-era terminology remains where necessary for provenance. Atlasyr remains a working product identity pending public naming clearance.
 
 The post-qualification product roadmap lives in [`ROADMAP.md`](ROADMAP.md).
 
@@ -246,6 +246,8 @@ The first post-qualification product milestone therefore measures a second real 
 ## Topcoat compatibility doctrine
 
 Topcoat compatibility is a permanent product function, not an occasional upgrade chore.
+
+The initial, version-qualified [Atlasyr/Topcoat capability ledger](docs/capability-ledger.md) records the current implementations, upstream status, ownership decisions, security responsibilities, and migration triggers.
 
 Each Atlasyr capability should be classified in an upstream capability ledger as one of:
 
@@ -1384,7 +1386,7 @@ tools where that behavior is intentional.
 
 Client-IP policy is deployment-sensitive and deny-first. Topcoat trusts no reverse proxies by default, so the application uses the direct peer address and ignores forwarded client-address headers unless an explicit trusted-proxy boundary is configured.
 
-Production deployments may configure `TRUSTED_PROXY_NETWORKS` as a comma-separated allowlist of exact proxy IP addresses and/or CIDR networks. The setting is loaded once at startup. An unset setting trusts no proxies; an explicitly empty, malformed, oversized, or catch-all configuration fails closed. Catch-all IPv4 and IPv6 networks such as `0.0.0.0/0` and `::/0` are not permitted.
+Production deployments may configure `TRUSTED_PROXY_NETWORKS` as a comma-separated allowlist of exact proxy IP addresses and/or CIDR networks. The setting is loaded once at startup. An unset setting trusts no proxies; an explicitly empty, malformed, or catch-all configuration fails closed. The number of configured networks has no arbitrary fixed cap; every entry remains validated, and operators should keep the allowlist restricted to actual trusted ingress networks. Catch-all IPv4 and IPv6 networks such as `0.0.0.0/0` and `::/0` are not permitted.
 
 When a request arrives from an explicitly trusted proxy network, Topcoat's trusted-proxy policy may use `X-Forwarded-For` to resolve the originating client address. The ingress proxy must therefore remove or overwrite any client-supplied `X-Forwarded-For` value and construct the forwarding chain from connection metadata it actually observes. A deployment must never add a proxy network to `TRUSTED_PROXY_NETWORKS` while allowing arbitrary client forwarding headers to pass through unchanged.
 
@@ -1968,7 +1970,7 @@ Verified during that investigation:
 
 `topcoat::dev::script()` remains part of the development integration because it provides Topcoat's browser-side development reload/status behavior.
 
-During the 0.9 investigation, the dynamically selected development endpoint was not exposed correctly to the host browser under the Docker configuration and could produce a refused `dev.js` request. That did not affect application functionality in the tested configuration. Any future work on this development endpoint should first revalidate the behavior against the pinned Topcoat 0.10 baseline rather than assuming the 0.9 observation remains unchanged.
+The historical Docker `dev.js` issue was revalidated against the pinned Topcoat 0.10.0 baseline on October 15, 2026. The Topcoat broadcaster successfully serves `/dev.js` inside the application container, but its loopback-only listener is not accessible from the host browser. Application HTTP routes continue to work. The development-only limitation is documented in [the verification record](docs/qualification/topcoat-0.10-dev-endpoint.md). No networking workaround has been adopted.
 
 The HTML-first view system and Topcoat development loop remain deliberately separate: MiniJinja autoreload handles ordinary HTML view edits, while Topcoat's development machinery remains responsible for Rust rebuild/reload behavior. The project does not reimplement Topcoat's private CLI reload protocol.
 

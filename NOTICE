@@ -1,0 +1,21 @@
+Atlasyr — Third-Party Attribution
+
+Atlasyr is an independent Rust web application framework
+built on Topcoat. Atlasyr is not an official Topcoat or
+Tokio project.
+
+Upstream framework: Topcoat
+Project: https://github.com/tokio-rs/topcoat
+Qualified dependency baseline: 0.10.0
+Copyright (c) 2026 Julien Scholz
+Upstream license: MIT
+
+The original Topcoat MIT copyright and permission notice is
+preserved in third_party/licenses/Topcoat-MIT.txt.
+
+Topcoat provides upstream web-framework capabilities.
+Atlasyr separately develops its application architecture,
+security policies, integration conventions, and developer tools.
+
+This attribution document does not establish or change the
+license terms of Atlasyr's own original source code.
