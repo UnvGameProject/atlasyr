@@ -114,6 +114,8 @@ See `docs/qualification/topcoat-0.10-dev-endpoint.md`.
 
 ## Maintenance contract
 
+For qualified upstream-version changes, follow the [Topcoat release-intake workflow](topcoat-release-intake.md) and update the [compatibility matrix](compatibility-matrix.md).
+
 When evaluating a Topcoat release or beginning an overlapping Atlasyr
 feature slice:
 
