@@ -1,0 +1,39 @@
+name: Topcoat Main Canary
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 9 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: topcoat-main-canary
+  cancel-in-progress: true
+
+jobs:
+  compatibility-canary:
+    name: Non-release upstream compatibility
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout Atlasyr
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust stable
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal
+          rustup run stable rustc --version
+
+      - name: Install Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Run isolated Topcoat main canary
+        run: ./scripts/topcoat-main-canary.sh
