@@ -555,6 +555,72 @@ printf '%s\n' \
     'production application served the public home page'
 
 
+
+printf '\n===== VERIFY NATIVE LOGIN PAGE / ASSET CONTEXT =====\n'
+
+LOGIN_HTTP_STATUS="$(
+    curl \
+        --silent \
+        --show-error \
+        --output "$TEMP_DIR/native-login.html" \
+        --write-out '%{http_code}' \
+        "http://127.0.0.1:${HOST_PORT}/login"
+)"
+
+test "$LOGIN_HTTP_STATUS" = '200'
+
+python3 - "$TEMP_DIR/native-login.html" <<'PYLOGIN'
+from html.parser import HTMLParser
+from pathlib import Path
+import sys
+
+class NativeLoginParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.tags = set()
+        self.ids = set()
+        self.stylesheets = []
+        self.scripts = []
+
+    def handle_starttag(self, tag, attrs):
+        self.tags.add(tag)
+        attrs = dict(attrs)
+
+        if attrs.get("id"):
+            self.ids.add(attrs["id"])
+
+        if tag == "link" and attrs.get("rel") == "stylesheet":
+            self.stylesheets.append(attrs.get("href", ""))
+
+        if tag == "script" and attrs.get("src"):
+            self.scripts.append(attrs["src"])
+
+html = Path(sys.argv[1]).read_text()
+parser = NativeLoginParser()
+parser.feed(html)
+
+required_tags = {"html", "head", "body", "form"}
+required_ids = {"login-email", "login-password"}
+
+if not required_tags.issubset(parser.tags):
+    raise SystemExit("native login page structure missing")
+
+if not required_ids.issubset(parser.ids):
+    raise SystemExit("native login form fields missing")
+
+if "Atlasyr" not in html or "Sign in" not in html:
+    raise SystemExit("native page content missing")
+
+if not parser.stylesheets:
+    raise SystemExit("native layout stylesheet references missing")
+
+if not parser.scripts:
+    raise SystemExit("native layout script references missing")
+
+print("native login route rendered successfully")
+print("Topcoat native layout and bundled asset references present")
+PYLOGIN
+
 printf '\n===== VERIFY LIVENESS / READINESS / REQUEST TELEMETRY =====\n'
 
 HEALTH_QUERY_SECRET='health-query-must-not-be-logged'
