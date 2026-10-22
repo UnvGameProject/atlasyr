@@ -175,6 +175,9 @@ fn router_builder_with_security_events_and_trusted_proxies(
 }
 
 #[cfg(test)]
+mod compatibility_contract_tests;
+
+#[cfg(test)]
 mod tests {
     use topcoat::router::{Body, Router, request::Request, response::Response, to_bytes};
 
